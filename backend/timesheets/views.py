@@ -6,6 +6,23 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
 from .serializers import CustomerSerializer, ProjectSerializer, TimesheetSerializer, TimesheetDetailSerializer, EmployeeProfileSerializer
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.db import transaction
+
+User = get_user_model()
+
+# Signal to create employee profile when user is created
+@receiver(post_save, sender=User)
+def create_employee_profile(sender, instance, created, **kwargs):
+    if created:
+        EmployeeProfile.objects.create(
+            user=instance,
+            role='employee',  # Default role
+            employee_id=f"{settings.EMPLOYEE_ID_PREFIX}{instance.id:0{settings.EMPLOYEE_ID_PADDING}d}"  # Use settings for ID format
+        )
 
 # Create your views here.
 
@@ -93,8 +110,9 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         responses={200: TimesheetSerializer}
     )
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def submit(self, request, uuid=None):
-        timesheet = self.get_object()
+        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
         if timesheet.status != 'draft':
             return Response(
                 {'error': 'Only draft timesheets can be submitted'},
@@ -111,11 +129,17 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         responses={200: TimesheetSerializer}
     )
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def approve(self, request, uuid=None):
-        timesheet = self.get_object()
+        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
         if timesheet.status != 'submitted':
             return Response(
                 {'error': 'Only submitted timesheets can be approved'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if timesheet.approved_by:
+            return Response(
+                {'error': 'This timesheet has already been approved'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         timesheet.status = 'approved'
@@ -130,11 +154,17 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         responses={200: TimesheetSerializer}
     )
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def reject(self, request, uuid=None):
-        timesheet = self.get_object()
+        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
         if timesheet.status != 'submitted':
             return Response(
                 {'error': 'Only submitted timesheets can be rejected'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if timesheet.approved_by:
+            return Response(
+                {'error': 'This timesheet has already been approved'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         reason = request.data.get('reason', '')
@@ -156,11 +186,17 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         responses={200: TimesheetSerializer}
     )
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def send_for_payment(self, request, uuid=None):
-        timesheet = self.get_object()
+        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
         if timesheet.status != 'approved':
             return Response(
                 {'error': 'Only approved timesheets can be sent for payment'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if timesheet.sent_for_payment_at:
+            return Response(
+                {'error': 'This timesheet has already been sent for payment'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         timesheet.status = 'pending_payment'
@@ -175,11 +211,17 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         responses={200: TimesheetSerializer}
     )
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def mark_as_paid(self, request, uuid=None):
-        timesheet = self.get_object()
+        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
         if timesheet.status != 'pending_payment':
             return Response(
                 {'error': 'Only pending payment timesheets can be marked as paid'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if timesheet.paid_at:
+            return Response(
+                {'error': 'This timesheet has already been marked as paid'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         timesheet.status = 'paid'
@@ -211,19 +253,57 @@ class TimesheetDetailViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(tags=['Employees'])
-class EmployeeProfileViewSet(viewsets.ViewSet):
+class EmployeeProfileViewSet(viewsets.ModelViewSet):
     """
-    Retrieve the authenticated user's employee profile
+    API endpoint for managing employee profiles.
+    
+    Provides CRUD operations for employee profile records.
     """
+    serializer_class = EmployeeProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'uuid'
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return EmployeeProfile.objects.all()
+        if hasattr(user, 'profile') and user.profile.role == 'manager':
+            return EmployeeProfile.objects.all()  # Managers can see all profiles
+        return EmployeeProfile.objects.filter(user=user)
+
+    def retrieve(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data)
+        except EmployeeProfile.DoesNotExist:
+            return Response(
+                {'error': 'Employee profile not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @extend_schema(responses={200: EmployeeProfileSerializer})
-    @action(detail=False, methods=['get'], url_path='me')
-    def me(self, request):
-        profile = request.user.profile
-        serializer = EmployeeProfileSerializer(profile)
-        return Response(serializer.data)
-    
+    @action(detail=False, methods=['get'], url_path='current-profile')
+    def current_profile(self, request):
+        try:
+            profile = request.user.profile
+            serializer = EmployeeProfileSerializer(profile)
+            return Response(serializer.data)
+        except EmployeeProfile.DoesNotExist:
+            return Response(
+                {'error': 'Employee profile not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response

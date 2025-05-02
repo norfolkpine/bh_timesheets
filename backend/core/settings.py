@@ -210,6 +210,10 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
+# Employee Settings
+EMPLOYEE_ID_PREFIX = os.getenv('EMPLOYEE_ID_PREFIX', 'EMP')
+EMPLOYEE_ID_PADDING = int(os.getenv('EMPLOYEE_ID_PADDING', '4'))  # Number of digits to pad with zeros
+
 # API Documentation
 SPECTACULAR_SETTINGS = {
     'TITLE': 'BH Timesheets API',

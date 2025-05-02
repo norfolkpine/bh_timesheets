@@ -41,17 +41,17 @@ interface TimesheetApprovalProps {
 
 // Add a function to display day notes
 const getDayNotes = (timesheet: Timesheet) => {
-  const notesWithContent = timesheet.dayNotes.filter((note) => note.trim() !== "")
+  const notesWithContent = timesheet.details.filter((detail) => detail.note?.trim() !== "")
   if (notesWithContent.length === 0) return null
 
   return (
     <div className="mt-2 p-2 bg-gray-50 border rounded text-sm">
       <p className="font-medium">Day Notes:</p>
       <ul className="list-disc pl-5 text-gray-600">
-        {timesheet.dayNotes.map((note, index) =>
-          note.trim() !== "" ? (
-            <li key={index}>
-              {format(addDays(timesheet.weekStarting, index), "EEE")}: {note}
+        {timesheet.details.map((detail) =>
+          detail.note?.trim() ? (
+            <li key={`${timesheet.uuid}-note-${detail.day}`}>
+              {format(addDays(new Date(timesheet.week_starting), detail.day), "EEE")}: {detail.note}
             </li>
           ) : null,
         )}
@@ -62,22 +62,20 @@ const getDayNotes = (timesheet: Timesheet) => {
 
 // Add a function to display time details
 const getTimeDetails = (timesheet: Timesheet) => {
-  if (!timesheet.timeDetails) return null
-
-  const daysWithDetails = timesheet.timeDetails.filter((detail) => detail?.useDetailedTime)
+  const daysWithDetails = timesheet.details.filter((detail) => detail.use_detailed_time)
   if (daysWithDetails.length === 0) return null
 
   return (
     <div className="mt-2 p-2 bg-gray-50 border rounded text-sm">
       <p className="font-medium">Time Details:</p>
       <ul className="list-disc pl-5 text-gray-600">
-        {timesheet.timeDetails.map((detail, index) =>
-          detail?.useDetailedTime ? (
-            <li key={index}>
-              {format(addDays(timesheet.weekStarting, index), "EEE")}: {detail.startTime} - {detail.endTime}
-              {detail.breakMinutes ? ` (${detail.breakMinutes}min break)` : ""}
+        {timesheet.details.map((detail) =>
+          detail.use_detailed_time ? (
+            <li key={`${timesheet.uuid}-time-${detail.day}`}>
+              {format(addDays(new Date(timesheet.week_starting), detail.day), "EEE")}: {detail.start_time} - {detail.end_time}
+              {detail.break_minutes ? ` (${detail.break_minutes}min break)` : ""}
               {" = "}
-              {timesheet.hours[index].toFixed(2)} hours
+              {detail.hours.toFixed(2)} hours
             </li>
           ) : null,
         )}
@@ -155,12 +153,12 @@ export function TimesheetApproval({
   }
 
   const getTotalHours = (details: Timesheet['details']) => {
-    return details.reduce((sum, detail) => sum + detail.hours, 0).toFixed(2)
+    return details.reduce((sum, detail) => sum + (detail.hours || 0), 0).toFixed(2)
   }
 
   // Calculate payment amount based on hours
   const calculatePaymentAmount = (details: Timesheet['details']) => {
-    const totalHours = details.reduce((sum, detail) => sum + detail.hours, 0)
+    const totalHours = details.reduce((sum, detail) => sum + (detail.hours || 0), 0)
     return (totalHours * DEFAULT_HOURLY_RATE).toFixed(2)
   }
 
@@ -188,13 +186,13 @@ export function TimesheetApproval({
   }
 
   // Get unique employees with approved, pending_payment, or paid timesheets
-  const employeesWithApprovedTimesheets = [
-    ...new Set(
+  const employeesWithApprovedTimesheets = Array.from(
+    new Set(
       timesheets
         .filter((ts) => ["approved", "pending_payment", "paid"].includes(ts.status))
-        .map((ts) => ts.user.name),
-    ),
-  ]
+        .map((ts) => ts.user.name)
+    )
+  )
 
   // Detailed day-by-day breakdown view
   if (detailedViewTimesheet) {
@@ -678,7 +676,7 @@ export function TimesheetApproval({
                               ["approved", "pending_payment", "paid"].includes(ts.status),
                           )
                           const totalHours = employeeTimesheets.reduce(
-                            (sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0),
+                            (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
                             0,
                           )
                           const totalAmount = totalHours * DEFAULT_HOURLY_RATE
@@ -719,15 +717,17 @@ export function TimesheetApproval({
                         <div className="flex justify-between items-center mt-1">
                           <p className="text-sm text-gray-600">
                             {approvedTimesheets
-                              .reduce((sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0), 0)
+                              .reduce((sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0), 0)
                               .toFixed(2)}{" "}
                             hours
                           </p>
                           <p className="text-sm font-medium text-green-600">
                             $
                             {(
-                              approvedTimesheets.reduce((sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0), 0) *
-                              DEFAULT_HOURLY_RATE
+                              approvedTimesheets.reduce(
+                                (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
+                                0
+                              ) * DEFAULT_HOURLY_RATE
                             ).toFixed(2)}
                           </p>
                         </div>
@@ -742,7 +742,7 @@ export function TimesheetApproval({
                         <div className="flex justify-between items-center mt-1">
                           <p className="text-sm text-gray-600">
                             {pendingPaymentTimesheets
-                              .reduce((sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0), 0)
+                              .reduce((sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0), 0)
                               .toFixed(2)}{" "}
                             hours
                           </p>
@@ -750,8 +750,8 @@ export function TimesheetApproval({
                             $
                             {(
                               pendingPaymentTimesheets.reduce(
-                                (sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0),
-                                0,
+                                (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
+                                0
                               ) * DEFAULT_HOURLY_RATE
                             ).toFixed(2)}
                           </p>
@@ -767,15 +767,17 @@ export function TimesheetApproval({
                         <div className="flex justify-between items-center mt-1">
                           <p className="text-sm text-gray-600">
                             {paidTimesheets
-                              .reduce((sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0), 0)
+                              .reduce((sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0), 0)
                               .toFixed(2)}{" "}
                             hours
                           </p>
                           <p className="text-sm font-medium text-green-600">
                             $
                             {(
-                              paidTimesheets.reduce((sum, ts) => sum + ts.details.reduce((h, v) => h + v, 0), 0) *
-                              DEFAULT_HOURLY_RATE
+                              paidTimesheets.reduce(
+                                (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
+                                0
+                              ) * DEFAULT_HOURLY_RATE
                             ).toFixed(2)}
                           </p>
                         </div>

@@ -76,13 +76,21 @@ class Timesheet(models.Model):
 
     def save(self, *args, **kwargs):
         # Calculate total hours from details
-        if self.id:  # Only calculate if the timesheet exists
-            total = Decimal('0.00')
-            for detail in self.details.all():
-                if detail.hours:
-                    total += Decimal(str(detail.hours))
-            self.total_hours = total
+        total = Decimal('0.00')
+        for detail in self.details.all():
+            if detail.hours:
+                total += Decimal(str(detail.hours))
+        self.total_hours = total
         super().save(*args, **kwargs)
+
+    def update_total_hours(self):
+        """Force update of total hours from details"""
+        total = Decimal('0.00')
+        for detail in self.details.all():
+            if detail.hours:
+                total += Decimal(str(detail.hours))
+        self.total_hours = total
+        self.save(update_fields=['total_hours'])
 
     @property
     def hours_array(self):
@@ -126,7 +134,13 @@ class TimesheetDetail(models.Model):
             break_minutes = self.break_minutes or 0
             total_minutes = end_minutes - start_minutes - break_minutes
             self.hours = Decimal(str(total_minutes / 60))
+        
+        # Save the detail
         super().save(*args, **kwargs)
+        
+        # Update the timesheet's total hours
+        if self.timesheet:
+            self.timesheet.update_total_hours()
 
     class Meta:
         unique_together = ('timesheet', 'day')  # Ensure only one detail per day per timesheet
@@ -156,3 +170,6 @@ class EmployeeProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.get_full_name()} ({self.employee_id})"
+
+    class Meta:
+        ordering = ['-created_at', 'employee_id']  # Order by newest first, then by employee_id

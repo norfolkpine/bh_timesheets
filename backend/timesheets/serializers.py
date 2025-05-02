@@ -134,15 +134,59 @@ class TimesheetSerializer(serializers.ModelSerializer):
 
 class EmployeeProfileSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
-    email = serializers.EmailField(source='user.email')
+    email = serializers.EmailField(source='user.email', read_only=True, allow_null=True)
+    first_name = serializers.CharField(source='user.first_name', required=False, allow_null=True, allow_blank=True)
+    last_name = serializers.CharField(source='user.last_name', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = EmployeeProfile
         fields = [
-            'id', 'name', 'email', 'role', 'employee_id', 'department', 'position',
-            'hourly_rate', 'bank_name', 'account_number', 'sort_code', 'tax_id',
-            'address', 'phone', 'start_date', 'is_active', 'notes', 'created_at'
+            'uuid', 'name', 'email', 'first_name', 'last_name', 'role', 'employee_id', 
+            'department', 'position', 'hourly_rate', 'bank_name', 'account_number', 
+            'sort_code', 'tax_id', 'address', 'phone', 'start_date', 'is_active', 
+            'notes', 'created_at'
         ]
+        read_only_fields = ['uuid', 'created_at', 'employee_id']
 
     def get_name(self, obj):
-        return obj.user.get_full_name()
+        if not obj.user:
+            return ''
+        return obj.user.get_full_name() or ''
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Ensure all user-related fields have default values if user is None
+        if not instance.user:
+            data.update({
+                'name': '',
+                'email': None,
+                'first_name': '',
+                'last_name': ''
+            })
+        return data
+
+    def validate(self, data):
+        # Validate bank details if provided
+        bank_fields = ['bank_name', 'account_number', 'sort_code']
+        if any(data.get(field) for field in bank_fields):
+            if not all(data.get(field) for field in bank_fields):
+                raise serializers.ValidationError(
+                    "If any bank details are provided, all bank details must be provided."
+                )
+        return data
+
+    def update(self, instance, validated_data):
+        # Handle nested user data
+        user_data = validated_data.pop('user', {})
+        if user_data and instance.user:
+            user = instance.user
+            for attr, value in user_data.items():
+                setattr(user, attr, value)
+            user.save()
+
+        # Update profile fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        return instance

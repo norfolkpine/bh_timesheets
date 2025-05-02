@@ -12,9 +12,6 @@ class ProjectAdminForm(forms.ModelForm):
     class Meta:
         model = Project
         fields = '__all__'
-        widgets = {
-            'customer': forms.Select(attrs={'class': 'select2'}),
-        }
 
 class TimesheetAdminForm(forms.ModelForm):
     class Meta:
@@ -62,12 +59,18 @@ class EmployeeProfileAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'employee_id', 'department', 'position')
     list_filter = ('role', 'department', 'is_active')
 
+class ProjectInline(admin.StackedInline):
+    model = Project
+    extra = 1
+    fields = ('name', 'billing_type', 'is_active', 'description')
+
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
     list_display = ('name', 'email', 'phone', 'is_active', 'created_at', 'updated_at')
     search_fields = ('name', 'email', 'phone', 'contact_name')
     list_filter = ('is_active', 'created_at', 'updated_at')
     ordering = ('name',)
+    inlines = [ProjectInline]
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
@@ -75,7 +78,7 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('name', 'customer', 'billing_type', 'is_active', 'created_at')
     list_filter = ('billing_type', 'is_active', 'customer', 'created_at')
     search_fields = ('name', 'customer__name', 'description')
-    raw_id_fields = ('customer',)
+    autocomplete_fields = ['customer']
     ordering = ('-created_at',)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
