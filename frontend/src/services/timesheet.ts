@@ -1,45 +1,8 @@
-import axios from 'axios';
+import { api } from './api';
+import type { Timesheet, TimesheetResponse, PaginatedResponse } from '@/types/timesheet';
 import { format } from 'date-fns';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-
-export interface TimesheetResponse {
-  uuid: string;
-  user: {
-    email: string;
-    name: string;
-  };
-  project: {
-    uuid: string;
-    name: string;
-    customer: {
-      uuid: string;
-      name: string;
-    };
-  };
-  week_starting: string;
-  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'paid' | 'pending_payment';
-  total_hours: number;
-  notes: string;
-  submitted_at: string | null;
-  approved_by: { email: string; name: string } | null;
-  approved_at: string | null;
-  rejection_reason: string | null;
-  sent_for_payment_at: string | null;
-  sent_for_payment_by: { email: string; name: string } | null;
-  paid_at: string | null;
-  paid_by: { email: string; name: string } | null;
-  details: Array<{
-    uuid: string;
-    day: number;
-    hours: number;
-    start_time: string | null;
-    end_time: string | null;
-    break_minutes: number | null;
-    use_detailed_time: boolean;
-    note: string | null;
-  }>;
-}
 
 export interface TimesheetCreate {
   week_starting: string;
@@ -64,140 +27,58 @@ class TimesheetService {
     };
   }
 
-  async getTimesheets() {
-    try {
-      const response = await axios.get<TimesheetResponse[]>(
-        `${API_URL}/timesheets/`,
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching timesheets:', error);
-      throw error;
-    }
+  async getTimesheets(): Promise<PaginatedResponse<TimesheetResponse>> {
+    const response = await api.get('/api/timesheets/');
+    return response.data;
   }
 
-  async getTimesheet(uuid: string) {
-    try {
-      const response = await axios.get<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/`,
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching timesheet ${uuid}:`, error);
-      throw error;
-    }
+  async getTimesheet(id: string): Promise<TimesheetResponse> {
+    const response = await api.get(`/api/timesheets/${id}/`);
+    return response.data;
   }
 
-  async createTimesheet(data: TimesheetCreate) {
-    try {
-      const response = await axios.post<TimesheetResponse>(
-        `${API_URL}/timesheets/`,
-        data,
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error creating timesheet:', error);
-      throw error;
-    }
+  async createTimesheet(data: Partial<Timesheet>): Promise<TimesheetResponse> {
+    const response = await api.post('/api/timesheets/', data);
+    return response.data;
   }
 
-  async updateTimesheet(uuid: string, data: TimesheetUpdate) {
-    try {
-      const response = await axios.patch<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/`,
-        data,
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error updating timesheet ${uuid}:`, error);
-      throw error;
-    }
+  async updateTimesheet(id: string, data: Partial<Timesheet>): Promise<TimesheetResponse> {
+    const response = await api.put(`/api/timesheets/${id}/`, data);
+    return response.data;
   }
 
-  async deleteTimesheet(uuid: string) {
-    try {
-      await axios.delete(
-        `${API_URL}/timesheets/${uuid}/`,
-        this.getAuthHeaders()
-      );
-    } catch (error) {
-      console.error(`Error deleting timesheet ${uuid}:`, error);
-      throw error;
-    }
+  async deleteTimesheet(id: string): Promise<void> {
+    await api.delete(`/api/timesheets/${id}/`);
   }
 
-  async submitTimesheet(uuid: string) {
-    try {
-      const response = await axios.post<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/submit/`,
-        {},
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error submitting timesheet ${uuid}:`, error);
-      throw error;
-    }
+  async submitTimesheet(id: string): Promise<TimesheetResponse> {
+    const response = await api.post(`/api/timesheets/${id}/submit/`);
+    return response.data;
   }
 
-  async approveTimesheet(uuid: string) {
-    try {
-      const response = await axios.post<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/approve/`,
-        {},
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error approving timesheet ${uuid}:`, error);
-      throw error;
-    }
+  async approveTimesheet(id: string): Promise<TimesheetResponse> {
+    const response = await api.post(`/api/timesheets/${id}/approve/`);
+    return response.data;
   }
 
-  async rejectTimesheet(uuid: string, reason: string) {
-    try {
-      const response = await axios.post<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/reject/`,
-        { reason },
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error rejecting timesheet ${uuid}:`, error);
-      throw error;
-    }
+  async rejectTimesheet(id: string, reason: string): Promise<TimesheetResponse> {
+    const response = await api.post(`/api/timesheets/${id}/reject/`, { reason });
+    return response.data;
   }
 
-  async sendForPayment(uuid: string) {
-    try {
-      const response = await axios.post<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/send-for-payment/`,
-        {},
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error sending timesheet ${uuid} for payment:`, error);
-      throw error;
-    }
+  async markAsPaid(id: string): Promise<TimesheetResponse> {
+    const response = await api.post(`/api/timesheets/${id}/mark-as-paid/`);
+    return response.data;
   }
 
-  async markAsPaid(uuid: string) {
-    try {
-      const response = await axios.post<TimesheetResponse>(
-        `${API_URL}/timesheets/${uuid}/mark-as-paid/`,
-        {},
-        this.getAuthHeaders()
-      );
-      return response.data;
-    } catch (error) {
-      console.error(`Error marking timesheet ${uuid} as paid:`, error);
-      throw error;
-    }
+  async sendForPayment(id: string): Promise<TimesheetResponse> {
+    const response = await api.post(`/api/timesheets/${id}/send-for-payment/`);
+    return response.data;
+  }
+
+  async undoApproval(id: string): Promise<TimesheetResponse> {
+    const response = await api.post(`/api/timesheets/${id}/undo-approval/`);
+    return response.data;
   }
 
   // Helper function to convert backend response to frontend format

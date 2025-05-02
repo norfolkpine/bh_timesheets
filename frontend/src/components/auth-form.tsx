@@ -35,8 +35,10 @@ export function AuthForm({ type, title, description }: AuthFormProps) {
     try {
       switch (type) {
         case 'login':
-          await authService.login({ email, password, remember });
-          router.push('/dashboard');
+          const response = await authService.login({ email, password, remember });
+          if (response) {
+            router.push('/dashboard');
+          }
           break;
         case 'signup':
           await authService.register({ email, password1: password, password2: confirmPassword });
@@ -169,7 +171,7 @@ export function AuthForm({ type, title, description }: AuthFormProps) {
                 </div>
               </form>
             </CardContent>
-            <CardFooter className="flex flex-col space-y-4">
+            <CardFooter>
               {type === 'login' && (
                 <div className="text-sm text-center">
                   <a href="/reset-password" className="text-primary hover:underline">

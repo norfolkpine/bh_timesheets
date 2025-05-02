@@ -31,11 +31,12 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       const data = await timesheetService.getTimesheets();
-      setTimesheets(data);
+      setTimesheets(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError('Failed to load timesheets');
       console.error('Error loading timesheets:', err);
+      setTimesheets([]);
     } finally {
       setLoading(false);
     }
@@ -44,6 +45,10 @@ export default function DashboardPage() {
   const handleCreateNew = () => {
     router.push('/timesheets/new');
   };
+
+  // Calculate statistics
+  const pendingCount = Array.isArray(timesheets) ? timesheets.filter(t => t.status === 'submitted').length : 0;
+  const totalHours = Array.isArray(timesheets) ? timesheets.reduce((sum, t) => sum + (t.total_hours || 0), 0) : 0;
 
   return (
     <div className="container mx-auto py-8">
@@ -71,9 +76,7 @@ export default function DashboardPage() {
               <CardTitle>Pending Approval</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">
-                {timesheets.filter(t => t.status === 'submitted').length}
-              </p>
+              <p className="text-2xl font-bold">{pendingCount}</p>
               <p className="text-sm text-gray-500">Timesheets waiting for approval</p>
             </CardContent>
           </Card>
@@ -82,9 +85,7 @@ export default function DashboardPage() {
               <CardTitle>Total Hours This Month</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">
-                {timesheets.reduce((sum, t) => sum + t.total_hours, 0)}
-              </p>
+              <p className="text-2xl font-bold">{totalHours}</p>
               <p className="text-sm text-gray-500">Hours logged this month</p>
             </CardContent>
           </Card>
@@ -100,6 +101,15 @@ export default function DashboardPage() {
               <div>Loading timesheets...</div>
             ) : error ? (
               <div className="text-red-500">{error}</div>
+            ) : !Array.isArray(timesheets) ? (
+              <div className="text-red-500">Invalid timesheet data received</div>
+            ) : timesheets.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No timesheets found</p>
+                <Button onClick={handleCreateNew} className="mt-4">
+                  Create Your First Timesheet
+                </Button>
+              </div>
             ) : (
               <div className="space-y-4">
                 {timesheets.slice(0, 5).map((timesheet) => (
@@ -152,15 +162,6 @@ export default function DashboardPage() {
                     </CardContent>
                   </Card>
                 ))}
-
-                {timesheets.length === 0 && (
-                  <div className="text-center py-8">
-                    <p className="text-gray-500">No timesheets found</p>
-                    <Button onClick={handleCreateNew} className="mt-4">
-                      Create Your First Timesheet
-                    </Button>
-                  </div>
-                )}
 
                 {timesheets.length > 5 && (
                   <div className="text-center">

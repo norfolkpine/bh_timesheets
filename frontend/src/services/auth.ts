@@ -1,15 +1,48 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_URL = 'http://localhost:8000/api';
 
-// Create an axios instance with default config
+// Create axios instance with default config
 const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true,
+  withCredentials: true, // Important for CORS with credentials
   headers: {
     'Content-Type': 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
   },
+});
+
+// Add request interceptor to handle CSRF token
+api.interceptors.request.use(async (config) => {
+  // Only add CSRF token for non-GET requests
+  if (config.method !== 'get') {
+    try {
+      // Get CSRF token from cookie
+      const csrfToken = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('csrftoken='))
+        ?.split('=')[1];
+      
+      if (csrfToken) {
+        config.headers['X-CSRFToken'] = csrfToken;
+      } else {
+        // If no CSRF token in cookie, make a request to get it
+        await axios.get(`${API_URL}/csrf/`, {
+          withCredentials: true,
+        });
+        // The cookie will be set automatically
+        const newCsrfToken = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('csrftoken='))
+          ?.split('=')[1];
+        if (newCsrfToken) {
+          config.headers['X-CSRFToken'] = newCsrfToken;
+        }
+      }
+    } catch (error) {
+      console.error('Error getting CSRF token:', error);
+    }
+  }
+  return config;
 });
 
 export interface LoginCredentials {
@@ -103,6 +136,11 @@ class AuthService {
         throw new Error(errorMessage);
       }
 
+      // Store the access token if it's in the response
+      if (response.data.access) {
+        localStorage.setItem('access_token', response.data.access);
+      }
+
       return response.data;
     } catch (error: any) {
       console.error('Login error:', error);
@@ -154,11 +192,13 @@ class AuthService {
   async logout() {
     try {
       await this.getCsrfToken();
-      await axios.post(
-        `${API_URL}/auth/logout/`,
+      await api.post(
+        '/auth/logout/',
         {},
         this.getAuthHeaders()
       );
+      // Clear the access token
+      localStorage.removeItem('access_token');
     } catch (error) {
       console.error('Logout error:', error);
       throw error;
@@ -167,8 +207,8 @@ class AuthService {
 
   async getCurrentUser() {
     try {
-      const response = await axios.get<User>(
-        `${API_URL}/auth/user/`,
+      const response = await api.get<User>(
+        '/auth/user/',
         this.getAuthHeaders()
       );
       return response.data;
@@ -182,8 +222,8 @@ class AuthService {
     try {
       await this.getCsrfToken();
 
-      const response = await axios.post(
-        `${API_URL}/auth/register/`,
+      const response = await api.post(
+        '/auth/registration/',
         credentials,
         {
           ...this.getAuthHeaders(),
@@ -217,8 +257,8 @@ class AuthService {
   async requestPasswordReset(data: PasswordResetRequest) {
     try {
       await this.getCsrfToken();
-      const response = await axios.post(
-        `${API_URL}/auth/password/reset/`,
+      const response = await api.post(
+        '/auth/password/reset/',
         data,
         this.getAuthHeaders()
       );
@@ -232,8 +272,8 @@ class AuthService {
   async confirmPasswordReset(data: PasswordResetConfirm) {
     try {
       await this.getCsrfToken();
-      const response = await axios.post(
-        `${API_URL}/auth/password/reset/confirm/`,
+      const response = await api.post(
+        '/auth/password/reset/confirm/',
         data,
         this.getAuthHeaders()
       );
@@ -242,6 +282,10 @@ class AuthService {
       console.error('Password reset confirmation error:', error);
       throw error;
     }
+  }
+
+  isAuthenticated() {
+    return !!localStorage.getItem('access_token');
   }
 }
 
