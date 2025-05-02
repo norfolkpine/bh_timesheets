@@ -13,38 +13,46 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
 import { startOfWeek, isSameDay, addWeeks } from "date-fns"
 import { Users, Building, Briefcase } from "lucide-react"
+import { timesheetService } from "@/services/timesheet"
 
 export type TimesheetStatus = "draft" | "submitted" | "approved" | "rejected" | "paid" | "pending_payment"
 
 export type UserRole = "employee" | "manager"
 
-export type User = {
-  id: string
+export interface User {
+  email: string
   name: string
-  role: UserRole
+  client: string
+  location: string
+  projectUuid: string
 }
 
-export type TimeDetail = {
-  day: number
-  date: string
+export interface TimeDetail {
+  day: string
+  date: Date
+  hours: number
   useDetailedTime: boolean
   startTime?: string
   endTime?: string
-  breakMinutes?: number
+  breakDuration?: number
   note?: string
 }
 
-export type Timesheet = {
+export interface Timesheet {
   id: string
+  uuid?: string
   weekStarting: Date
   client: string
-  location: string // This is actually the project name
-  status: TimesheetStatus
+  location: string
+  status: string
   hours: number[]
   timeDetails: TimeDetail[]
   dayNotes: string[]
   notes: string
   submittedBy: string
+  project: {
+    uuid: string
+  }
   submittedAt?: Date
   approvedBy?: string
   approvedAt?: Date
@@ -241,71 +249,60 @@ export function SimpleTimesheet() {
     setViewingInvoice(false)
   }
 
-  const createNewTimesheet = (weekStartingDate?: Date) => {
-    // If no date is provided, use the current week
-    const today = new Date()
-    let monday: Date
+  const createNewTimesheet = (date: Date = new Date()) => {
+    // Get the Monday of the current week
+    const monday = new Date(date)
+    monday.setDate(date.getDate() - date.getDay() + 1)
+    monday.setHours(0, 0, 0, 0)
 
-    if (weekStartingDate) {
-      // Use the provided date (should already be a Monday)
-      monday = weekStartingDate
-    } else {
-      // Find the most recent Monday
-      const day = today.getDay()
-      const diff = today.getDate() - day + (day === 0 ? -6 : 1)
-      monday = new Date(today)
-      monday.setDate(diff)
-    }
-
-    // Allow creating timesheets up to 3 days before the week starts
-    const threeDaysFromNow = new Date(today)
-    threeDaysFromNow.setDate(today.getDate() + 3)
+    // Check if we're trying to create a timesheet too far in advance
+    const threeDaysFromNow = new Date()
+    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3)
     if (monday > threeDaysFromNow) {
-      alert("Cannot create timesheets more than 3 days in advance.")
+      alert("Cannot create timesheets more than 3 days in advance")
       return
     }
 
     // Check if a timesheet already exists for this week
     const existingTimesheet = timesheets.find(
-      (ts) =>
-        ts.submittedBy === currentUser.name && isSameDay(startOfWeek(ts.weekStarting, { weekStartsOn: 1 }), monday),
+      (t) => t.weekStarting.getTime() === monday.getTime()
     )
 
     if (existingTimesheet) {
-      // If a timesheet exists, edit it instead of creating a new one
       setEditingTimesheet(existingTimesheet)
-      setActiveTab("add")
       return
     }
 
     // Create time details for each day of the week
-    const timeDetails: TimeDetail[] = Array.from({ length: 7 }, (_, index) => {
+    const timeDetails = Array.from({ length: 7 }, (_, index) => {
       const date = new Date(monday)
       date.setDate(monday.getDate() + index)
       return {
-        day: index,
-        date: date.toISOString().split('T')[0],
+        day: index.toString(),
+        date: date,
+        hours: 0,
         useDetailedTime: false
       }
     })
 
     const newTimesheet: Timesheet = {
-      id: crypto.randomUUID(),
+      id: `temp-${Date.now()}`,
       weekStarting: monday,
-      client: "",
-      location: "", // Project name
+      client: currentUser.client,
+      location: currentUser.location,
       status: "draft",
-      hours: [0, 0, 0, 0, 0, 0, 0],
-      timeDetails,
-      dayNotes: ["", "", "", "", "", "", ""],
+      hours: Array(7).fill(0),
+      timeDetails: timeDetails,
+      dayNotes: Array(7).fill(""),
       notes: "",
-      submittedBy: currentUser.name,
+      submittedBy: currentUser.email,
+      project: {
+        uuid: currentUser.projectUuid
+      }
     }
 
-    // Add the new timesheet to the beginning of the array
     setTimesheets([newTimesheet, ...timesheets])
     setEditingTimesheet(newTimesheet)
-    setActiveTab("add")
   }
 
   // Update the editTimesheet function to allow viewing any timesheet, but in read-only mode if needed
@@ -323,41 +320,97 @@ export function SimpleTimesheet() {
     }
   }
 
-  const saveTimesheet = (updatedTimesheet: Timesheet) => {
-    setTimesheets(timesheets.map((ts) => (ts.id === updatedTimesheet.id ? updatedTimesheet : ts)))
-    setActiveTab("entries")
-    setEditingTimesheet(null)
-  }
+  const saveTimesheet = async (updatedTimesheet: Timesheet) => {
+    try {
+      // Convert frontend timesheet to backend format
+      const backendData = {
+        week_starting: updatedTimesheet.weekStarting.toISOString().split('T')[0],
+        project_uuid: updatedTimesheet.project.uuid,
+        details_data: updatedTimesheet.timeDetails.map((detail, index) => ({
+          day: detail.day,
+          date: detail.date.toISOString().split('T')[0],
+          hours: updatedTimesheet.hours[index] || 0,
+          start_time: detail.startTime,
+          end_time: detail.endTime,
+          break_minutes: detail.breakDuration,
+          use_detailed_time: detail.useDetailedTime,
+          note: detail.note || updatedTimesheet.dayNotes[index] || ''
+        })),
+        notes: updatedTimesheet.notes
+      }
 
-  const submitTimesheet = (timesheetId: string | Timesheet) => {
-    // Handle both direct timesheet object (from entry form) and timesheet ID (from list)
-    if (typeof timesheetId === "string") {
-      setTimesheets(
-        timesheets.map((ts) =>
-          ts.id === timesheetId
-            ? {
-                ...ts,
-                status: "submitted" as TimesheetStatus,
-                submittedAt: new Date(),
-              }
-            : ts,
-        ),
-      )
-    } else {
-      // Handle direct timesheet object
-      setTimesheets(
-        timesheets.map((ts) =>
-          ts.id === timesheetId.id
-            ? {
-                ...timesheetId,
-                status: "submitted" as TimesheetStatus,
-                submittedAt: new Date(),
-              }
-            : ts,
-        ),
-      )
+      // If the timesheet has a temporary ID (starts with 'temp-'), create it first
+      if (updatedTimesheet.id.startsWith('temp-')) {
+        const response = await timesheetService.createTimesheet(backendData)
+        
+        // Update the timesheet with the backend response
+        const newTimesheet = {
+          ...updatedTimesheet,
+          id: response.uuid,
+          uuid: response.uuid
+        }
+        
+        setTimesheets(timesheets.map((ts) => (ts.id === updatedTimesheet.id ? newTimesheet : ts)))
+      } else {
+        // Update existing timesheet
+        await timesheetService.updateTimesheet(updatedTimesheet.id, backendData)
+      }
+      
       setActiveTab("entries")
       setEditingTimesheet(null)
+    } catch (error) {
+      console.error('Error saving timesheet:', error)
+      alert('Failed to save timesheet. Please try again.')
+    }
+  }
+
+  const submitTimesheet = async (timesheetId: string | Timesheet) => {
+    try {
+      // Handle both direct timesheet object (from entry form) and timesheet ID (from list)
+      const timesheet = typeof timesheetId === "string" 
+        ? timesheets.find((ts) => ts.id === timesheetId)
+        : timesheetId
+
+      if (!timesheet) return
+
+      // Convert frontend timesheet to backend format
+      const backendData = {
+        week_starting: timesheet.weekStarting.toISOString().split('T')[0],
+        project_uuid: timesheet.project.uuid,
+        details_data: timesheet.timeDetails.map((detail, index) => ({
+          day: detail.day,
+          date: detail.date.toISOString().split('T')[0],
+          hours: timesheet.hours[index] || 0,
+          start_time: detail.startTime,
+          end_time: detail.endTime,
+          break_minutes: detail.breakDuration,
+          use_detailed_time: detail.useDetailedTime,
+          note: detail.note || timesheet.dayNotes[index] || ''
+        })),
+        notes: timesheet.notes
+      }
+
+      await timesheetService.submitTimesheet(timesheet.id)
+      
+      setTimesheets(
+        timesheets.map((ts) =>
+          ts.id === timesheet.id
+            ? {
+                ...timesheet,
+                status: "submitted",
+                submittedAt: new Date()
+              }
+            : ts
+        )
+      )
+
+      if (typeof timesheetId !== "string") {
+        setActiveTab("entries")
+        setEditingTimesheet(null)
+      }
+    } catch (error) {
+      console.error('Error submitting timesheet:', error)
+      alert('Failed to submit timesheet. Please try again.')
     }
   }
 
