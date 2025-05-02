@@ -260,6 +260,30 @@ class TimesheetViewSet(AuditLogMixin, TimesheetSubmissionMixin, viewsets.ModelVi
     def mark_as_paid(self, request, uuid=None):
         return self.mark_as_paid(request, uuid)
 
+    @extend_schema(
+        description="Undo approval of a timesheet",
+        responses={200: TimesheetSerializer}
+    )
+    @action(detail=True, methods=['post'])
+    @transaction.atomic
+    def undo_approval(self, request, uuid=None):
+        """Undo approval of a timesheet"""
+        timesheet = self.get_object()
+        
+        if timesheet.status != 'approved':
+            return Response(
+                {'error': 'Only approved timesheets can have their approval undone'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        timesheet.status = 'submitted'
+        timesheet.approved_by = None
+        timesheet.approved_at = None
+        timesheet.save()
+        
+        serializer = self.get_serializer(timesheet)
+        return Response(serializer.data)
+
 @extend_schema(tags=['Timesheet Details'])
 class TimesheetDetailViewSet(viewsets.ModelViewSet):
     """
