@@ -38,14 +38,28 @@ export function ProjectForm({ onSave, onCancel, initialProject, customers }: Pro
     resolver: zodResolver(projectFormSchema),
     defaultValues: {
       name: initialProject?.name || "",
-      customerId: initialProject?.customerId || "",
+      customerId:
+        initialProject?.customerId ||
+        initialProject?.customer_object?.uuid ||
+        initialProject?.customer ||
+        initialProject?.customer_uuid ||
+        "",
       description: initialProject?.description || "",
-      billingType: initialProject?.billingType || "hourly",
-      hourlyRate: initialProject?.hourlyRate || undefined,
-      dailyRate: initialProject?.dailyRate || undefined,
-      fixedPrice: initialProject?.fixedPrice || undefined,
-      retainerAmount: initialProject?.retainerAmount || undefined,
-      isActive: initialProject?.isActive !== undefined ? initialProject.isActive : true,
+      billingType: (initialProject?.billingType || initialProject?.billing_type || "hourly") as
+        | "hourly"
+        | "daily"
+        | "fixed"
+        | "retainer",
+      hourlyRate: initialProject?.hourlyRate || initialProject?.hourly_rate || undefined,
+      dailyRate: initialProject?.dailyRate || initialProject?.daily_rate || undefined,
+      fixedPrice: initialProject?.fixedPrice || initialProject?.fixed_price || undefined,
+      retainerAmount: initialProject?.retainerAmount || initialProject?.retainer_amount || undefined,
+      isActive:
+        initialProject?.isActive !== undefined
+          ? initialProject.isActive
+          : initialProject?.is_active !== undefined
+            ? initialProject.is_active
+            : true,
     },
   })
 
@@ -91,9 +105,9 @@ export function ProjectForm({ onSave, onCancel, initialProject, customers }: Pro
                     </FormControl>
                     <SelectContent>
                       {customers
-                        .filter((customer) => customer.isActive)
+                        .filter((customer) => customer.isActive || customer.is_active)
                         .map((customer) => (
-                          <SelectItem key={customer.id} value={customer.id}>
+                          <SelectItem key={customer.uuid} value={customer.uuid}>
                             {customer.name}
                           </SelectItem>
                         ))}

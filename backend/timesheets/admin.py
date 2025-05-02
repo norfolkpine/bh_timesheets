@@ -2,7 +2,7 @@ from django.contrib import admin
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory
 
 User = get_user_model()
 
@@ -89,11 +89,31 @@ class ProjectAdmin(admin.ModelAdmin):
 @admin.register(Timesheet)
 class TimesheetAdmin(admin.ModelAdmin):
     form = TimesheetAdminForm
-    list_display = ('user', 'project', 'week_starting', 'total_hours', 'status', 'created_at')
+    list_display = ('uuid', 'user', 'project', 'week_starting', 'total_hours', 'status', 'created_at')
     list_filter = ('status', 'week_starting', 'project', 'user')
-    search_fields = ('user__email', 'project__name', 'notes')
+    search_fields = ('user__email', 'project__name', 'notes', 'uuid')
     raw_id_fields = ('approved_by', 'sent_for_payment_by', 'paid_by')
     ordering = ('-week_starting',)
+    readonly_fields = ('uuid', 'created_at', 'updated_at')
+    actions = ['undo_approval']
+
+    def undo_approval(self, request, queryset):
+        """Undo approval of selected timesheets"""
+        updated = 0
+        for timesheet in queryset:
+            if timesheet.status == 'approved':
+                timesheet.status = 'submitted'
+                timesheet.approved_by = None
+                timesheet.approved_at = None
+                timesheet.save()
+                updated += 1
+        
+        if updated == 1:
+            message = "1 timesheet was successfully unapproved."
+        else:
+            message = f"{updated} timesheets were successfully unapproved."
+        self.message_user(request, message)
+    undo_approval.short_description = "Undo approval of selected timesheets"
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "user":
@@ -105,14 +125,15 @@ class TimesheetAdmin(admin.ModelAdmin):
 @admin.register(TimesheetDetail)
 class TimesheetDetailAdmin(admin.ModelAdmin):
     form = TimesheetDetailAdminForm
-    list_display = ('timesheet', 'day', 'hours', 'start_time', 'end_time', 'break_minutes', 'use_detailed_time')
+    list_display = ('uuid', 'timesheet', 'day', 'hours', 'start_time', 'end_time', 'break_minutes', 'use_detailed_time')
     list_filter = ('day', 'use_detailed_time', 'timesheet__week_starting')
-    search_fields = ('note', 'timesheet__user__email', 'timesheet__project__name')
+    search_fields = ('note', 'timesheet__user__email', 'timesheet__project__name', 'uuid')
     raw_id_fields = ('timesheet',)
     ordering = ('-timesheet__week_starting', 'day')
+    readonly_fields = ('uuid', 'created_at', 'updated_at')
     fieldsets = (
         (None, {
-            'fields': ('timesheet', 'day', 'hours', 'use_detailed_time')
+            'fields': ('uuid', 'timesheet', 'day', 'hours', 'use_detailed_time')
         }),
         ('Detailed Time', {
             'fields': ('start_time', 'end_time', 'break_minutes'),
@@ -125,3 +146,39 @@ class TimesheetDetailAdmin(admin.ModelAdmin):
             'description': 'Optional notes for this day'
         }),
     )
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = ('record_type', 'field_name', 'changed_by', 'changed_at', 'record_uuid')
+    list_filter = ('record_type', 'field_type', 'changed_at')
+    search_fields = ('field_name', 'old_value', 'new_value', 'notes', 'record_uuid')
+    readonly_fields = ('uuid', 'record_type', 'record_uuid', 'field_type', 'field_name', 
+                      'old_value', 'new_value', 'changed_by', 'changed_at', 'notes')
+    ordering = ('-changed_at',)
+    
+    def has_add_permission(self, request):
+        return False  # Audit logs should only be created by the system
+    
+    def has_change_permission(self, request, obj=None):
+        return False  # Audit logs should not be editable
+    
+    def has_delete_permission(self, request, obj=None):
+        return False  # Audit logs should not be deletable
+
+@admin.register(RateHistory)
+class RateHistoryAdmin(admin.ModelAdmin):
+    list_display = ('rate_type', 'employee', 'project', 'rate', 'effective_from', 'effective_to', 'created_by', 'created_at')
+    list_filter = ('rate_type', 'effective_from', 'effective_to')
+    search_fields = ('employee__user__email', 'project__name', 'notes')
+    readonly_fields = ('uuid', 'created_at')
+    raw_id_fields = ('employee', 'project', 'created_by')
+    ordering = ('-effective_from',)
+    
+    def has_add_permission(self, request):
+        return request.user.is_staff  # Only staff can add rate history
+    
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_staff  # Only staff can modify rate history
+    
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_staff  # Only staff can delete rate history

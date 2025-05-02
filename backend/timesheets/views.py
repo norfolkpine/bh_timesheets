@@ -4,10 +4,10 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
-from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory, Invoice
 from .serializers import (
     CustomerSerializer, ProjectSerializer, TimesheetSerializer, 
-    TimesheetDetailSerializer, EmployeeProfileSerializer, AuditLogSerializer, RateHistorySerializer
+    TimesheetDetailSerializer, EmployeeProfileSerializer, AuditLogSerializer, RateHistorySerializer, InvoiceSerializer
 )
 from .mixins import AuditLogMixin, TimesheetSubmissionMixin
 from django.db.models.signals import post_save
@@ -262,7 +262,8 @@ class TimesheetViewSet(AuditLogMixin, TimesheetSubmissionMixin, viewsets.ModelVi
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def send_for_payment(self, request, uuid=None):
-        return self.send_for_payment(request, uuid)
+        """Mark an approved timesheet as pending payment"""
+        return super().send_for_payment(request, uuid)
 
     @extend_schema(
         description="Mark a pending payment timesheet as paid",
@@ -271,7 +272,8 @@ class TimesheetViewSet(AuditLogMixin, TimesheetSubmissionMixin, viewsets.ModelVi
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def mark_as_paid(self, request, uuid=None):
-        return self.mark_as_paid(request, uuid)
+        """Mark a pending payment timesheet as paid"""
+        return super().mark_as_paid(request, uuid)
 
     @extend_schema(
         description="Undo approval of a timesheet",
@@ -488,3 +490,131 @@ def current_user_info(request):
         'role': 'manager' if is_manager else 'employee',
         'is_staff': user.is_staff
     })
+
+@extend_schema(tags=['Invoices'])
+class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    """
+    API endpoint for managing invoices.
+    
+    Provides CRUD operations for invoice records, including status management
+    and timesheet associations.
+    """
+    serializer_class = InvoiceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'uuid'
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = Invoice.objects.all()
+        
+        # Filter by customer if provided
+        customer_uuid = self.request.query_params.get('customer')
+        if customer_uuid:
+            queryset = queryset.filter(customer__uuid=customer_uuid)
+            
+        # Filter by project if provided
+        project_uuid = self.request.query_params.get('project')
+        if project_uuid:
+            queryset = queryset.filter(project__uuid=project_uuid)
+            
+        # Filter by status if provided
+        status = self.request.query_params.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+            
+        # Filter by date range if provided
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        if start_date:
+            queryset = queryset.filter(start_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(end_date__lte=end_date)
+            
+        # Non-staff users can only see invoices they created
+        if not user.is_staff and not (hasattr(user, 'profile') and user.profile.role == 'manager'):
+            queryset = queryset.filter(created_by=user)
+            
+        return queryset.order_by('-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @extend_schema(
+        description="Mark an invoice as sent",
+        responses={200: InvoiceSerializer}
+    )
+    @action(detail=True, methods=['post'])
+    def mark_as_sent(self, request, uuid=None):
+        """Mark an invoice as sent"""
+        invoice = self.get_object()
+        invoice.mark_as_sent()
+        serializer = self.get_serializer(invoice)
+        return Response(serializer.data)
+
+    @extend_schema(
+        description="Mark an invoice as paid",
+        responses={200: InvoiceSerializer}
+    )
+    @action(detail=True, methods=['post'])
+    def mark_as_paid(self, request, uuid=None):
+        """Mark an invoice as paid"""
+        invoice = self.get_object()
+        invoice.mark_as_paid()
+        serializer = self.get_serializer(invoice)
+        return Response(serializer.data)
+
+    @extend_schema(
+        description="Mark an invoice as overdue",
+        responses={200: InvoiceSerializer}
+    )
+    @action(detail=True, methods=['post'])
+    def mark_as_overdue(self, request, uuid=None):
+        """Mark an invoice as overdue"""
+        invoice = self.get_object()
+        invoice.mark_as_overdue()
+        serializer = self.get_serializer(invoice)
+        return Response(serializer.data)
+
+    @extend_schema(
+        description="Get summary statistics for invoices",
+        responses={200: None}
+    )
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get summary statistics for invoices"""
+        queryset = self.get_queryset()
+        
+        # Calculate totals
+        total_amount = queryset.aggregate(
+            total=models.Sum('total_amount')
+        )['total'] or 0
+        
+        # Calculate amounts by status
+        amounts_by_status = {}
+        for status, _ in Invoice.STATUS_CHOICES:
+            amount = queryset.filter(status=status).aggregate(
+                total=models.Sum('total_amount')
+            )['total'] or 0
+            amounts_by_status[status] = amount
+            
+        # Calculate count by status
+        count_by_status = {}
+        for status, _ in Invoice.STATUS_CHOICES:
+            count = queryset.filter(status=status).count()
+            count_by_status[status] = count
+            
+        # Calculate amounts by customer
+        amounts_by_customer = {}
+        for invoice in queryset:
+            customer_name = invoice.customer.name
+            if customer_name not in amounts_by_customer:
+                amounts_by_customer[customer_name] = 0
+            amounts_by_customer[customer_name] += invoice.total_amount or 0
+        
+        return Response({
+            'total_amount': total_amount,
+            'amounts_by_status': amounts_by_status,
+            'count_by_status': count_by_status,
+            'amounts_by_customer': amounts_by_customer,
+            'total_invoices': queryset.count(),
+        })

@@ -16,16 +16,62 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { customerService } from "@/services/customer"
-import type { Customer, CustomerCreate, CustomerUpdate } from "@/types/customer"
-import { toast } from "sonner"
+import { customerService } from "@/services/customer-service"
+import { useToast } from "@/hooks/use-toast"
 
-interface PaginatedResponse<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
+export type Customer = {
+  id?: string
+  uuid: string
+  name: string
+  contactName?: string
+  contact_name?: string
+  email?: string
+  phone?: string
+  address?: string
+  notes?: string
+  isActive?: boolean
+  is_active?: boolean
+  createdAt?: Date
+  updatedAt?: Date
 }
+
+// Sample customers for demonstration
+export const INITIAL_CUSTOMERS: Customer[] = [
+  {
+    id: "cust1",
+    uuid: "uuid1",
+    name: "ABC Corporation",
+    contactName: "Jane Smith",
+    email: "jane.smith@abccorp.com",
+    phone: "+1 (555) 123-4567",
+    address: "123 Main St, Anytown, USA",
+    isActive: true,
+    createdAt: new Date(2023, 0, 1),
+  },
+  {
+    id: "cust2",
+    uuid: "uuid2",
+    name: "XYZ Industries",
+    contactName: "John Doe",
+    email: "john.doe@xyzind.com",
+    phone: "+1 (555) 234-5678",
+    address: "456 Elm St, Anytown, USA",
+    isActive: true,
+    createdAt: new Date(2023, 1, 15),
+  },
+  {
+    id: "cust3",
+    uuid: "uuid3",
+    name: "PQR Solutions",
+    contactName: "Alice Brown",
+    email: "alice.brown@pqrsolutions.com",
+    phone: "+1 (555) 345-6789",
+    address: "789 Oak St, Anytown, USA",
+    isActive: false,
+    createdAt: new Date(2023, 2, 1),
+    updatedAt: new Date(2023, 3, 30),
+  },
+]
 
 export function CustomerManagement() {
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -35,31 +81,42 @@ export function CustomerManagement() {
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState("all")
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const { toast } = useToast()
 
   useEffect(() => {
     loadCustomers()
   }, [])
 
   const loadCustomers = async () => {
+    setIsLoading(true)
     try {
-      setLoading(true)
-      const response = await customerService.getCustomers()
-      // Handle both array and paginated responses
-      if (Array.isArray(response)) {
-        setCustomers(response)
-      } else {
-        const paginatedResponse = response as unknown as PaginatedResponse<Customer>
-        setCustomers(paginatedResponse.results || [])
+      console.log("Loading customers...")
+      const data = await customerService.getCustomers()
+      console.log("Customers loaded:", data)
+
+      // Always ensure we have an array
+      setCustomers(Array.isArray(data) ? data : INITIAL_CUSTOMERS)
+
+      if (!Array.isArray(data)) {
+        console.warn("Customer data is not an array, using initial customers instead")
+        toast({
+          title: "Warning",
+          description: "Could not load customers from server. Using default data instead.",
+          variant: "warning",
+        })
       }
-      setError(null)
-    } catch (err) {
-      console.error('Error loading customers:', err)
-      setError('Failed to load customers')
-      toast.error('Failed to load customers')
+    } catch (error) {
+      console.error("Failed to load customers:", error)
+      // Fall back to initial customers if API call fails
+      setCustomers(INITIAL_CUSTOMERS)
+      toast({
+        title: "Error",
+        description: "Failed to load customers. Using default data instead.",
+        variant: "destructive",
+      })
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
@@ -68,9 +125,37 @@ export function CustomerManagement() {
     setEditingCustomer(null)
   }
 
-  const handleEditCustomer = (customer: Customer) => {
-    setEditingCustomer(customer)
-    setIsAddingCustomer(false)
+  const handleEditCustomer = async (customer: Customer) => {
+    try {
+      setIsLoading(true)
+      // Fetch the full customer details by UUID
+      const customerDetails = await customerService.getCustomerById(customer.uuid)
+      console.log("Fetched customer details:", customerDetails)
+
+      // Create a properly formatted customer object for the form
+      const customerToEdit = {
+        uuid: customerDetails.uuid,
+        name: customerDetails.name || "",
+        contactName: customerDetails.contact_name || "",
+        email: customerDetails.email || "",
+        phone: customerDetails.phone || "",
+        address: customerDetails.address || "",
+        notes: customerDetails.notes || "",
+        isActive: customerDetails.is_active !== undefined ? customerDetails.is_active : true,
+      }
+
+      setEditingCustomer(customerToEdit)
+      setIsAddingCustomer(false)
+    } catch (error) {
+      console.error("Failed to fetch customer details:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load customer details. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleDeleteClick = (customer: Customer) => {
@@ -81,40 +166,83 @@ export function CustomerManagement() {
   const confirmDelete = async () => {
     if (customerToDelete) {
       try {
-        await customerService.deleteCustomer(customerToDelete.id)
-        setCustomers(customers.filter((c) => c.id !== customerToDelete.id))
+        await customerService.deleteCustomer(customerToDelete.uuid)
+        // Refresh the customer list instead of filtering locally
+        await loadCustomers()
+        toast({
+          title: "Success",
+          description: "Customer deleted successfully",
+        })
+      } catch (error) {
+        console.error("Failed to delete customer:", error)
+        toast({
+          title: "Error",
+          description: "Failed to delete customer. Please try again.",
+          variant: "destructive",
+        })
+      } finally {
         setDeleteDialogOpen(false)
         setCustomerToDelete(null)
-        toast.success('Customer deleted successfully')
-      } catch (err) {
-        console.error('Error deleting customer:', err)
-        toast.error('Failed to delete customer')
       }
     }
   }
 
-  const handleSaveCustomer = async (customerData: CustomerCreate | CustomerUpdate) => {
+  const handleSaveCustomer = async (customerData: any) => {
     try {
       if (editingCustomer) {
+        // Format the data for the API
+        const apiCustomerData = {
+          name: customerData.name,
+          contact_name: customerData.contactName,
+          email: customerData.email,
+          phone: customerData.phone,
+          address: customerData.address,
+          notes: customerData.notes,
+          is_active: customerData.isActive,
+        }
+
         // Update existing customer
-        const updatedCustomer = await customerService.updateCustomer(editingCustomer.id, customerData)
-        setCustomers(
-          customers.map((customer) =>
-            customer.id === editingCustomer.id ? updatedCustomer : customer
-          )
-        )
-        setEditingCustomer(null)
-        toast.success('Customer updated successfully')
+        const updatedCustomer = await customerService.updateCustomer(editingCustomer.uuid, apiCustomerData)
+
+        // Refresh the customer list
+        await loadCustomers()
+
+        toast({
+          title: "Success",
+          description: "Customer updated successfully",
+        })
       } else {
+        // Format the data for the API
+        const apiCustomerData = {
+          name: customerData.name,
+          contact_name: customerData.contactName,
+          email: customerData.email,
+          phone: customerData.phone,
+          address: customerData.address,
+          notes: customerData.notes,
+          is_active: customerData.isActive,
+        }
+
         // Add new customer
-        const newCustomer = await customerService.createCustomer(customerData as CustomerCreate)
-        setCustomers([...customers, newCustomer])
-        setIsAddingCustomer(false)
-        toast.success('Customer created successfully')
+        await customerService.createCustomer(apiCustomerData)
+
+        // Refresh the customer list
+        await loadCustomers()
+
+        toast({
+          title: "Success",
+          description: "Customer created successfully",
+        })
       }
-    } catch (err) {
-      console.error('Error saving customer:', err)
-      toast.error('Failed to save customer')
+      setEditingCustomer(null)
+      setIsAddingCustomer(false)
+    } catch (error) {
+      console.error("Failed to save customer:", error)
+      toast({
+        title: "Error",
+        description: "Failed to save customer. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -124,34 +252,18 @@ export function CustomerManagement() {
   }
 
   // Filter customers based on search query and active tab
-  const filteredCustomers = Array.isArray(customers) ? customers.filter((customer) => {
+  const filteredCustomers = customers.filter((customer) => {
     const matchesSearch =
       customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (customer.contactName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-      (customer.email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+      customer.contactName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      customer.email?.toLowerCase().includes(searchQuery.toLowerCase())
 
     if (activeTab === "all") return matchesSearch
-    if (activeTab === "active") return matchesSearch && customer.isActive
-    if (activeTab === "inactive") return matchesSearch && !customer.isActive
+    if (activeTab === "active") return matchesSearch && (customer.isActive === true || customer.is_active === true)
+    if (activeTab === "inactive") return matchesSearch && (customer.isActive === false || customer.is_active === false)
 
     return matchesSearch
-  }) : []
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading customers...</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-red-500">{error}</div>
-      </div>
-    )
-  }
+  })
 
   // If we're adding or editing a customer, show the form
   if (isAddingCustomer || editingCustomer) {
@@ -202,7 +314,13 @@ export function CustomerManagement() {
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-4">
-          {filteredCustomers.length === 0 ? (
+          {isLoading ? (
+            <Card>
+              <CardContent className="pt-6 pb-6 text-center">
+                <p className="text-gray-500">Loading customers...</p>
+              </CardContent>
+            </Card>
+          ) : filteredCustomers.length === 0 ? (
             <Card>
               <CardContent className="pt-6 pb-6 text-center">
                 <p className="text-gray-500">No customers found.</p>
@@ -222,14 +340,16 @@ export function CustomerManagement() {
                 </thead>
                 <tbody>
                   {filteredCustomers.map((customer) => (
-                    <tr key={customer.id} className="border-b hover:bg-gray-50">
+                    <tr key={customer.uuid} className="border-b hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Building className="h-5 w-5 text-gray-400" />
                           <div className="font-medium">{customer.name}</div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{customer.contactName || "—"}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {customer.contactName || customer.contact_name || "—"}
+                      </td>
                       <td className="px-4 py-3 text-gray-600">
                         {customer.email || "—"}
                         {customer.phone && <div className="text-xs text-gray-500">{customer.phone}</div>}
@@ -237,9 +357,13 @@ export function CustomerManagement() {
                       <td className="px-4 py-3">
                         <Badge
                           variant="outline"
-                          className={customer.isActive ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}
+                          className={
+                            customer.isActive || customer.is_active
+                              ? "bg-green-100 text-green-800"
+                              : "bg-gray-100 text-gray-800"
+                          }
                         >
-                          {customer.isActive ? "Active" : "Inactive"}
+                          {customer.isActive || customer.is_active ? "Active" : "Inactive"}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">

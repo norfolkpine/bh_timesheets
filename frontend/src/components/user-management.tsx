@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Plus, Edit, Trash2, UserIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,151 +16,138 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { employeeService, type EmployeeProfile } from "@/services/employee-service"
+import { useToast } from "@/hooks/use-toast"
 
-// Extended User type with additional fields
-export type ExtendedUser = {
+export interface ExtendedUser {
   id: string
-  name: string
   email: string
+  first_name: string
+  last_name: string
   role: "employee" | "manager"
-  employeeId?: string
+  is_staff: boolean
   department?: string
   position?: string
-  hourlyRate?: number
-  bankName?: string
-  accountNumber?: string
-  sortCode?: string
-  taxId?: string
+  hourly_rate?: number
+  bank_name?: string
+  account_number?: string
+  sort_code?: string
+  tax_id?: string
   address?: string
   phone?: string
-  startDate?: string
-  isActive: boolean
+  start_date?: string
+  is_active: boolean
   notes?: string
-  createdAt: Date
-  updatedAt?: Date
 }
 
-// Sample users for demonstration
-const INITIAL_USERS: ExtendedUser[] = [
-  {
-    id: "user1",
-    name: "John Smith",
-    email: "john.smith@example.com",
-    role: "employee",
-    employeeId: "EMP-001",
-    department: "Engineering",
-    position: "Software Developer",
-    hourlyRate: 25,
-    bankName: "Bank of Example",
-    accountNumber: "12345678",
-    sortCode: "12-34-56",
-    taxId: "AB123456C",
-    address: "123 Main St, City, State, ZIP",
-    phone: "+1 (555) 123-4567",
-    startDate: "2023-01-15",
-    isActive: true,
-    notes: "Full-time employee",
-    createdAt: new Date(2023, 0, 15),
-  },
-  {
-    id: "user2",
-    name: "Sarah Johnson",
-    email: "sarah.johnson@example.com",
-    role: "employee",
-    employeeId: "EMP-002",
-    department: "Design",
-    position: "UI/UX Designer",
-    hourlyRate: 28,
-    bankName: "City Bank",
-    accountNumber: "87654321",
-    sortCode: "65-43-21",
-    taxId: "CD987654E",
-    address: "456 Oak St, City, State, ZIP",
-    phone: "+1 (555) 987-6543",
-    startDate: "2023-02-01",
-    isActive: true,
-    notes: "Part-time employee, works 3 days a week",
-    createdAt: new Date(2023, 1, 1),
-  },
-  {
-    id: "user3",
-    name: "Michael Manager",
-    email: "michael.manager@example.com",
-    role: "manager",
-    employeeId: "MGR-001",
-    department: "Operations",
-    position: "Project Manager",
-    hourlyRate: 35,
-    bankName: "Global Bank",
-    accountNumber: "11223344",
-    sortCode: "11-22-33",
-    taxId: "EF112233G",
-    address: "789 Pine St, City, State, ZIP",
-    phone: "+1 (555) 456-7890",
-    startDate: "2022-11-01",
-    isActive: true,
-    notes: "Department manager",
-    createdAt: new Date(2022, 10, 1),
-  },
-]
-
 export function UserManagement() {
-  const [users, setUsers] = useState<ExtendedUser[]>(INITIAL_USERS)
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([])
   const [isAddingUser, setIsAddingUser] = useState(false)
-  const [editingUser, setEditingUser] = useState<ExtendedUser | null>(null)
+  const [editingUser, setEditingUser] = useState<EmployeeProfile | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [userToDelete, setUserToDelete] = useState<ExtendedUser | null>(null)
+  const [userToDelete, setUserToDelete] = useState<EmployeeProfile | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState("all")
+  const [isLoading, setIsLoading] = useState(true)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    loadEmployees()
+  }, [])
+
+  const loadEmployees = async () => {
+    setIsLoading(true)
+    try {
+      const data = await employeeService.getEmployees()
+      setEmployees(data)
+    } catch (error) {
+      console.error("Failed to load employees:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load employees. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleAddUser = () => {
     setIsAddingUser(true)
     setEditingUser(null)
   }
 
-  const handleEditUser = (user: ExtendedUser) => {
-    setEditingUser(user)
-    setIsAddingUser(false)
-  }
-
-  const handleDeleteClick = (user: ExtendedUser) => {
-    setUserToDelete(user)
-    setDeleteDialogOpen(true)
-  }
-
-  const confirmDelete = () => {
-    if (userToDelete) {
-      setUsers(users.filter((u) => u.id !== userToDelete.id))
-      setDeleteDialogOpen(false)
-      setUserToDelete(null)
+  const handleEditUser = async (employee: EmployeeProfile) => {
+    try {
+      const employeeDetails = await employeeService.getEmployeeById(employee.uuid)
+      setEditingUser(employeeDetails)
+      setIsAddingUser(false)
+    } catch (error) {
+      console.error("Failed to fetch employee details:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load employee details. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
-  const handleSaveUser = (userData: any) => {
-    if (editingUser) {
-      // Update existing user
-      setUsers(
-        users.map((user) =>
-          user.id === editingUser.id
-            ? {
-                ...user,
-                ...userData,
-                updatedAt: new Date(),
-              }
-            : user,
-        ),
-      )
-      setEditingUser(null)
-    } else {
-      // Add new user
-      const newUser: ExtendedUser = {
-        id: `user${users.length + 1}`,
-        ...userData,
-        isActive: userData.isActive !== undefined ? userData.isActive : true,
-        createdAt: new Date(),
+  const handleDeleteClick = (employee: EmployeeProfile) => {
+    setUserToDelete(employee)
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (userToDelete) {
+      try {
+        await employeeService.deleteEmployee(userToDelete.uuid)
+        setEmployees(employees.filter((e) => e.uuid !== userToDelete.uuid))
+        toast({
+          title: "Success",
+          description: "Employee deleted successfully",
+        })
+      } catch (error) {
+        console.error("Failed to delete employee:", error)
+        toast({
+          title: "Error",
+          description: "Failed to delete employee. Please try again.",
+          variant: "destructive",
+        })
+      } finally {
+        setDeleteDialogOpen(false)
+        setUserToDelete(null)
       }
-      setUsers([...users, newUser])
+    }
+  }
+
+  const handleSaveUser = async (userData: any) => {
+    try {
+      if (editingUser) {
+        // Update existing employee
+        const updatedEmployee = await employeeService.updateEmployee(editingUser.uuid, userData)
+        setEmployees(employees.map((employee) => (employee.uuid === editingUser.uuid ? updatedEmployee : employee)))
+        toast({
+          title: "Success",
+          description: "Employee updated successfully",
+        })
+      } else {
+        // Add new employee
+        const newEmployee = await employeeService.createEmployee(userData)
+        setEmployees([...employees, newEmployee])
+        toast({
+          title: "Success",
+          description: "Employee created successfully",
+        })
+      }
+      setEditingUser(null)
       setIsAddingUser(false)
+    } catch (error) {
+      console.error("Failed to save employee:", error)
+      toast({
+        title: "Error",
+        description: "Failed to save employee. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -169,20 +156,21 @@ export function UserManagement() {
     setEditingUser(null)
   }
 
-  // Filter users based on search query and active tab
-  const filteredUsers = users.filter((user) => {
+  // Filter employees based on search query and active tab
+  const filteredEmployees = employees.filter((employee) => {
+    const fullName = `${employee.first_name || ""} ${employee.last_name || ""}`.toLowerCase()
     const matchesSearch =
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.employeeId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.position?.toLowerCase().includes(searchQuery.toLowerCase())
+      fullName.includes(searchQuery.toLowerCase()) ||
+      (employee.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (employee.employee_id || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (employee.department || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (employee.position || "").toLowerCase().includes(searchQuery.toLowerCase())
 
     if (activeTab === "all") return matchesSearch
-    if (activeTab === "employees") return matchesSearch && user.role === "employee"
-    if (activeTab === "managers") return matchesSearch && user.role === "manager"
-    if (activeTab === "active") return matchesSearch && user.isActive
-    if (activeTab === "inactive") return matchesSearch && !user.isActive
+    if (activeTab === "employees") return matchesSearch && employee.role === "employee"
+    if (activeTab === "managers") return matchesSearch && employee.role === "manager"
+    if (activeTab === "active") return matchesSearch && employee.is_active
+    if (activeTab === "inactive") return matchesSearch && !employee.is_active
 
     return matchesSearch
   })
@@ -192,9 +180,13 @@ export function UserManagement() {
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-bold">{editingUser ? `Edit User: ${editingUser.name}` : "Add New User"}</h2>
+          <h2 className="text-2xl font-bold">
+            {editingUser
+              ? `Edit Employee: ${editingUser.first_name || ""} ${editingUser.last_name || ""}`
+              : "Add New Employee"}
+          </h2>
           <Button variant="outline" onClick={handleCancelUserForm}>
-            Back to User List
+            Back to Employee List
           </Button>
         </div>
 
@@ -206,16 +198,16 @@ export function UserManagement() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">User Management</h2>
+        <h2 className="text-2xl font-bold">Employee Management</h2>
         <Button onClick={handleAddUser}>
           <Plus className="mr-2 h-4 w-4" />
-          Add New User
+          Add New Employee
         </Button>
       </div>
 
       <div className="flex items-center space-x-2">
         <Input
-          placeholder="Search users..."
+          placeholder="Search employees..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-sm"
@@ -224,7 +216,7 @@ export function UserManagement() {
 
       <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="all">All Users</TabsTrigger>
+          <TabsTrigger value="all">All Employees</TabsTrigger>
           <TabsTrigger value="employees">Employees</TabsTrigger>
           <TabsTrigger value="managers">Managers</TabsTrigger>
           <TabsTrigger value="active">Active</TabsTrigger>
@@ -232,10 +224,16 @@ export function UserManagement() {
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-4">
-          {filteredUsers.length === 0 ? (
+          {isLoading ? (
             <Card>
               <CardContent className="pt-6 pb-6 text-center">
-                <p className="text-gray-500">No users found.</p>
+                <p className="text-gray-500">Loading employees...</p>
+              </CardContent>
+            </Card>
+          ) : filteredEmployees.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6 pb-6 text-center">
+                <p className="text-gray-500">No employees found.</p>
               </CardContent>
             </Card>
           ) : (
@@ -253,49 +251,53 @@ export function UserManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id} className="border-b hover:bg-gray-50">
+                  {filteredEmployees.map((employee) => (
+                    <tr key={employee.uuid} className="border-b hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <UserIcon className="h-5 w-5 text-gray-400" />
                           <div>
-                            <div className="font-medium">{user.name}</div>
-                            <div className="text-xs text-gray-500">{user.employeeId || "No ID"}</div>
+                            <div className="font-medium">
+                              {`${employee.first_name || ""} ${employee.last_name || ""}`}
+                            </div>
+                            <div className="text-xs text-gray-500">{employee.employee_id || "No ID"}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{user.email}</td>
+                      <td className="px-4 py-3 text-gray-600">{employee.email || "No email"}</td>
                       <td className="px-4 py-3">
                         <Badge
                           variant="outline"
                           className={
-                            user.role === "manager" ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800"
+                            employee.role === "manager" ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800"
                           }
                         >
-                          {user.role === "manager" ? "Manager" : "Employee"}
+                          {employee.role === "manager" ? "Manager" : "Employee"}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{user.department || "Not specified"}</td>
+                      <td className="px-4 py-3 text-gray-600">{employee.department || "Not specified"}</td>
                       <td className="px-4 py-3 text-gray-600">
-                        {user.hourlyRate ? `$${user.hourlyRate.toFixed(2)}` : "Not set"}
+                        {employee.hourly_rate != null && !isNaN(employee.hourly_rate)
+                          ? `$${Number(employee.hourly_rate).toFixed(2)}`
+                          : "Not set"}
                       </td>
                       <td className="px-4 py-3">
                         <Badge
                           variant="outline"
-                          className={user.isActive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
+                          className={employee.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
                         >
-                          {user.isActive ? "Active" : "Inactive"}
+                          {employee.is_active ? "Active" : "Inactive"}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => handleEditUser(user)}>
+                          <Button variant="ghost" size="sm" onClick={() => handleEditUser(employee)}>
                             <Edit className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDeleteClick(user)}
+                            onClick={() => handleDeleteClick(employee)}
                             className="text-red-500"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -316,7 +318,9 @@ export function UserManagement() {
           <DialogHeader>
             <DialogTitle>Confirm Deletion</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete the user "{userToDelete?.name}"? This action cannot be undone.
+              Are you sure you want to delete the employee "
+              {userToDelete ? `${userToDelete.first_name || ""} ${userToDelete.last_name || ""}` : "this employee"}
+              "? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -324,7 +328,7 @@ export function UserManagement() {
               Cancel
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
-              Delete User
+              Delete Employee
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,6 +1,6 @@
-"\"use client"
+"use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Plus, Edit, Trash2, Briefcase } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,86 +16,184 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { type Customer, INITIAL_CUSTOMERS } from "./customer-management"
+import type { Customer } from "./customer-management"
+import { projectService } from "@/services/project-service"
+import { customerService } from "@/services/customer-service"
+import { useToast } from "@/hooks/use-toast"
 
 export type Project = {
-  id: string
+  id?: string
+  uuid: string
   name: string
-  customerId: string
+  customerId?: string
+  customer?: string
+  customer_uuid?: string
   description?: string
-  billingType: "hourly" | "daily" | "fixed" | "retainer"
+  billingType?: "hourly" | "daily" | "fixed" | "retainer"
+  billing_type?: string
   hourlyRate?: number
+  hourly_rate?: number
   dailyRate?: number
+  daily_rate?: number
   fixedPrice?: number
+  fixed_price?: number
   retainerAmount?: number
-  isActive: boolean
-  createdAt: Date
+  retainer_amount?: number
+  isActive?: boolean
+  is_active?: boolean
+  createdAt?: Date
   updatedAt?: Date
+  customer_object?: {
+    uuid: string
+    name: string
+    email?: string
+    phone?: string
+    contact_name?: string
+    address?: string
+    notes?: string
+    is_active?: boolean
+  }
 }
 
 // Sample projects for demonstration
 export const INITIAL_PROJECTS: Project[] = [
   {
     id: "proj1",
+    uuid: "project-uuid-1",
     name: "Website Redesign",
     customerId: "cust1",
-    description: "Complete overhaul of the corporate website with new branding",
+    description: "Redesign the company website for a modern look and improved user experience.",
     billingType: "hourly",
-    hourlyRate: 85,
+    hourlyRate: 75.0,
     isActive: true,
-    createdAt: new Date(2023, 2, 1),
   },
   {
     id: "proj2",
+    uuid: "project-uuid-2",
     name: "Mobile App Development",
-    customerId: "cust1",
-    description: "iOS and Android app for customer engagement",
+    customerId: "cust2",
+    description: "Develop a mobile app for iOS and Android platforms.",
     billingType: "fixed",
-    fixedPrice: 25000,
+    fixedPrice: 15000.0,
     isActive: true,
-    createdAt: new Date(2023, 3, 15),
   },
   {
     id: "proj3",
-    name: "IT Support",
-    customerId: "cust2",
-    description: "Ongoing technical support and maintenance",
-    billingType: "retainer",
-    retainerAmount: 2000,
-    isActive: true,
-    createdAt: new Date(2023, 0, 1),
-  },
-  {
-    id: "proj4",
-    name: "Database Migration",
+    uuid: "project-uuid-3",
+    name: "Marketing Campaign",
     customerId: "cust3",
-    description: "Migrate from legacy system to cloud database",
-    billingType: "daily",
-    dailyRate: 600,
+    description: "Run a marketing campaign to increase brand awareness.",
+    billingType: "retainer",
+    retainerAmount: 2000.0,
     isActive: false,
-    createdAt: new Date(2023, 1, 15),
-    updatedAt: new Date(2023, 3, 30),
   },
 ]
 
 export function ProjectManagement() {
-  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS)
-  const [customers] = useState<Customer[]>(INITIAL_CUSTOMERS)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [isAddingProject, setIsAddingProject] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState("all")
+  const [isLoading, setIsLoading] = useState(true)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const loadData = async () => {
+    setIsLoading(true)
+    try {
+      // Load both projects and customers
+      const [projectsData, customersData] = await Promise.all([
+        projectService.getProjects(),
+        customerService.getCustomers(),
+      ])
+
+      console.log("Projects loaded:", projectsData)
+      console.log("Customers loaded:", customersData)
+
+      // Always ensure we have arrays
+      setProjects(Array.isArray(projectsData) ? projectsData : INITIAL_PROJECTS)
+      setCustomers(Array.isArray(customersData) ? customersData : [])
+
+      if (!Array.isArray(projectsData)) {
+        console.warn("Project data is not an array, using initial projects instead")
+        toast({
+          title: "Warning",
+          description: "Could not load projects from server. Using default data instead.",
+          variant: "warning",
+        })
+      }
+    } catch (error) {
+      console.error("Failed to load data:", error)
+      // Fall back to initial data if API calls fail
+      setProjects(INITIAL_PROJECTS)
+      setCustomers([])
+      toast({
+        title: "Error",
+        description: "Failed to load data. Using default data instead.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleAddProject = () => {
     setIsAddingProject(true)
     setEditingProject(null)
   }
 
-  const handleEditProject = (project: Project) => {
-    setEditingProject(project)
-    setIsAddingProject(false)
+  const handleEditProject = async (project: Project) => {
+    try {
+      setIsLoading(true)
+      // Fetch the full project details by UUID
+      const projectDetails = await projectService.getProjectById(project.uuid)
+      console.log("Fetched project details:", projectDetails)
+
+      // Create a properly formatted project object for the form
+      const customerUuid =
+        projectDetails.customer?.uuid || projectDetails.customer || projectDetails.customer_uuid || ""
+
+      const projectToEdit = {
+        uuid: projectDetails.uuid,
+        name: projectDetails.name || "",
+        customerId: customerUuid,
+        customer_uuid: customerUuid,
+        customer_object: projectDetails.customer,
+        description: projectDetails.description || "",
+        billingType: projectDetails.billing_type || "hourly",
+        billing_type: projectDetails.billing_type || "hourly",
+        hourlyRate: projectDetails.hourly_rate,
+        hourly_rate: projectDetails.hourly_rate,
+        dailyRate: projectDetails.daily_rate,
+        daily_rate: projectDetails.daily_rate,
+        fixedPrice: projectDetails.fixed_price,
+        fixed_price: projectDetails.fixed_price,
+        retainerAmount: projectDetails.retainer_amount,
+        retainer_amount: projectDetails.retainer_amount,
+        isActive: projectDetails.is_active !== undefined ? projectDetails.is_active : true,
+        is_active: projectDetails.is_active !== undefined ? projectDetails.is_active : true,
+      }
+
+      console.log("Formatted project for editing:", projectToEdit)
+      setEditingProject(projectToEdit)
+      setIsAddingProject(false)
+    } catch (error) {
+      console.error("Failed to fetch project details:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load project details. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleDeleteClick = (project: Project) => {
@@ -103,39 +201,70 @@ export function ProjectManagement() {
     setDeleteDialogOpen(true)
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (projectToDelete) {
-      setProjects(projects.filter((p) => p.id !== projectToDelete.id))
-      setDeleteDialogOpen(false)
-      setProjectToDelete(null)
+      try {
+        await projectService.deleteProject(projectToDelete.uuid)
+        // Refresh the project list instead of filtering locally
+        await loadData()
+        toast({
+          title: "Success",
+          description: "Project deleted successfully",
+        })
+      } catch (error) {
+        console.error("Failed to delete project:", error)
+        toast({
+          title: "Error",
+          description: "Failed to delete project. Please try again.",
+          variant: "destructive",
+        })
+      } finally {
+        setDeleteDialogOpen(false)
+        setProjectToDelete(null)
+      }
     }
   }
 
-  const handleSaveProject = (projectData: any) => {
-    if (editingProject) {
-      // Update existing project
-      setProjects(
-        projects.map((project) =>
-          project.id === editingProject.id
-            ? {
-                ...project,
-                ...projectData,
-                updatedAt: new Date(),
-              }
-            : project,
-        ),
-      )
-      setEditingProject(null)
-    } else {
-      // Add new project
-      const newProject: Project = {
-        id: `proj${projects.length + 1}`,
-        ...projectData,
-        isActive: projectData.isActive !== undefined ? projectData.isActive : true,
-        createdAt: new Date(),
+  const handleSaveProject = async (projectData: any) => {
+    try {
+      // Format the data for the API
+      const apiProjectData = {
+        name: projectData.name,
+        customer_uuid: projectData.customerId, // API expects 'customer_uuid' field
+        description: projectData.description,
+        billing_type: projectData.billingType,
+        hourly_rate: projectData.billingType === "hourly" ? projectData.hourlyRate : null,
+        daily_rate: projectData.billingType === "daily" ? projectData.dailyRate : null,
+        fixed_price: projectData.billingType === "fixed" ? projectData.fixedPrice : null,
+        retainer_amount: projectData.billingType === "retainer" ? projectData.retainerAmount : null,
+        is_active: projectData.isActive,
       }
-      setProjects([...projects, newProject])
+
+      if (editingProject) {
+        // Update existing project
+        await projectService.updateProject(editingProject.uuid, apiProjectData)
+      } else {
+        // Add new project
+        await projectService.createProject(apiProjectData)
+      }
+
+      // Refresh the project list
+      await loadData()
+
+      setEditingProject(null)
       setIsAddingProject(false)
+
+      toast({
+        title: "Success",
+        description: editingProject ? "Project updated successfully" : "Project created successfully",
+      })
+    } catch (error) {
+      console.error("Failed to save project:", error)
+      toast({
+        title: "Error",
+        description: "Failed to save project. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -144,45 +273,68 @@ export function ProjectManagement() {
     setEditingProject(null)
   }
 
-  // Get customer name by ID
-  const getCustomerName = (customerId: string) => {
-    const customer = customers.find((c) => c.id === customerId)
+  const getCustomerName = (customerId: string | any): string => {
+    // If customerId is actually a customer object
+    if (customerId && typeof customerId === "object" && customerId.name) {
+      return customerId.name
+    }
+
+    // If customerId is a string (UUID)
+    const customer = customers.find((c) => c.id === customerId || c.uuid === customerId)
+
     return customer ? customer.name : "Unknown Customer"
   }
 
   // Get billing rate display
   const getBillingRateDisplay = (project: Project) => {
-    switch (project.billingType) {
-      case "hourly":
-        return project.hourlyRate ? `$${project.hourlyRate.toFixed(2)}/hr` : "—"
-      case "daily":
-        return project.dailyRate ? `$${project.dailyRate.toFixed(2)}/day` : "—"
-      case "fixed":
-        return project.fixedPrice ? `$${project.fixedPrice.toFixed(2)} fixed` : "—"
-      case "retainer":
-        return project.retainerAmount ? `$${project.retainerAmount.toFixed(2)}/month` : "—"
+    const billingType = project.billingType || project.billing_type
+
+    switch (billingType) {
+      case "hourly": {
+        const rate = project.hourlyRate || project.hourly_rate
+        return rate ? `$${Number(rate).toFixed(2)}/hr` : "—"
+      }
+      case "daily": {
+        const rate = project.dailyRate || project.daily_rate
+        return rate ? `$${Number(rate).toFixed(2)}/day` : "—"
+      }
+      case "fixed": {
+        const price = project.fixedPrice || project.fixed_price
+        return price ? `$${Number(price).toFixed(2)} fixed` : "—"
+      }
+      case "retainer": {
+        const amount = project.retainerAmount || project.retainer_amount
+        return amount ? `$${Number(amount).toFixed(2)}/month` : "—"
+      }
       default:
         return "—"
     }
   }
 
   // Filter projects based on search query and active tab
-  const filteredProjects = projects.filter((project) => {
-    const matchesSearch =
-      project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      getCustomerName(project.customerId).toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredProjects = Array.isArray(projects)
+    ? projects.filter((project) => {
+        const matchesSearch =
+          project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          getCustomerName(project.customerId || project.customer || project.customer_uuid || "")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase()) ||
+          (project.description || "").toLowerCase().includes(searchQuery.toLowerCase())
 
-    if (activeTab === "all") return matchesSearch
-    if (activeTab === "active") return matchesSearch && project.isActive
-    if (activeTab === "inactive") return matchesSearch && !project.isActive
-    if (activeTab === "hourly") return matchesSearch && project.billingType === "hourly"
-    if (activeTab === "daily") return matchesSearch && project.billingType === "daily"
-    if (activeTab === "fixed") return matchesSearch && project.billingType === "fixed"
-    if (activeTab === "retainer") return matchesSearch && project.billingType === "retainer"
+        const isProjectActive = project.isActive || project.is_active
+        const projectBillingType = project.billingType || project.billing_type
 
-    return matchesSearch
-  })
+        if (activeTab === "all") return matchesSearch
+        if (activeTab === "active") return matchesSearch && isProjectActive
+        if (activeTab === "inactive") return matchesSearch && !isProjectActive
+        if (activeTab === "hourly") return matchesSearch && projectBillingType === "hourly"
+        if (activeTab === "daily") return matchesSearch && projectBillingType === "daily"
+        if (activeTab === "fixed") return matchesSearch && projectBillingType === "fixed"
+        if (activeTab === "retainer") return matchesSearch && projectBillingType === "retainer"
+
+        return matchesSearch
+      })
+    : []
 
   // If we're adding or editing a project, show the form
   if (isAddingProject || editingProject) {
@@ -238,7 +390,13 @@ export function ProjectManagement() {
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-4">
-          {filteredProjects.length === 0 ? (
+          {isLoading ? (
+            <Card>
+              <CardContent className="pt-6 pb-6 text-center">
+                <p className="text-gray-500">Loading projects...</p>
+              </CardContent>
+            </Card>
+          ) : filteredProjects.length === 0 ? (
             <Card>
               <CardContent className="pt-6 pb-6 text-center">
                 <p className="text-gray-500">No projects found.</p>
@@ -259,32 +417,34 @@ export function ProjectManagement() {
                 </thead>
                 <tbody>
                   {filteredProjects.map((project) => (
-                    <tr key={project.id} className="border-b hover:bg-gray-50">
+                    <tr key={project.uuid} className="border-b hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Briefcase className="h-5 w-5 text-gray-400" />
                           <div className="font-medium">{project.name}</div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{getCustomerName(project.customerId)}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {getCustomerName(project.customerId || project.customer || project.customer_uuid || "")}
+                      </td>
                       <td className="px-4 py-3">
                         <Badge
                           variant="outline"
                           className={
-                            project.billingType === "hourly"
+                            (project.billingType || project.billing_type) === "hourly"
                               ? "bg-blue-100 text-blue-800"
-                              : project.billingType === "daily"
+                              : (project.billingType || project.billing_type) === "daily"
                                 ? "bg-purple-100 text-purple-800"
-                                : project.billingType === "fixed"
+                                : (project.billingType || project.billing_type) === "fixed"
                                   ? "bg-amber-100 text-amber-800"
                                   : "bg-green-100 text-green-800"
                           }
                         >
-                          {project.billingType === "hourly"
+                          {(project.billingType || project.billing_type) === "hourly"
                             ? "Hourly"
-                            : project.billingType === "daily"
+                            : (project.billingType || project.billing_type) === "daily"
                               ? "Day Rate"
-                              : project.billingType === "fixed"
+                              : (project.billingType || project.billing_type) === "fixed"
                                 ? "Fixed Price"
                                 : "Retainer"}
                         </Badge>
@@ -293,9 +453,13 @@ export function ProjectManagement() {
                       <td className="px-4 py-3">
                         <Badge
                           variant="outline"
-                          className={project.isActive ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}
+                          className={
+                            project.isActive || project.is_active
+                              ? "bg-green-100 text-green-800"
+                              : "bg-gray-100 text-gray-800"
+                          }
                         >
-                          {project.isActive ? "Active" : "Inactive"}
+                          {project.isActive || project.is_active ? "Active" : "Inactive"}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">

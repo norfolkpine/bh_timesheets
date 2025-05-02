@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { format, addDays } from "date-fns"
+import { format } from "date-fns/format"
+import { addDays } from "date-fns/addDays"
 import {
   CheckCircle,
   XCircle,
@@ -14,7 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react"
-import type { Timesheet } from "@/types/timesheet"
+import type { Timesheet } from "./simple-timesheet"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 
 interface TimesheetApprovalProps {
   timesheets: Timesheet[]
@@ -41,17 +43,17 @@ interface TimesheetApprovalProps {
 
 // Add a function to display day notes
 const getDayNotes = (timesheet: Timesheet) => {
-  const notesWithContent = timesheet.details.filter((detail) => detail.note?.trim() !== "")
+  const notesWithContent = timesheet.dayNotes.filter((note) => note.trim() !== "")
   if (notesWithContent.length === 0) return null
 
   return (
     <div className="mt-2 p-2 bg-gray-50 border rounded text-sm">
       <p className="font-medium">Day Notes:</p>
       <ul className="list-disc pl-5 text-gray-600">
-        {timesheet.details.map((detail) =>
-          detail.note?.trim() ? (
-            <li key={`${timesheet.uuid}-note-${detail.day}`}>
-              {format(addDays(new Date(timesheet.week_starting), detail.day), "EEE")}: {detail.note}
+        {timesheet.dayNotes.map((note, index) =>
+          note.trim() !== "" ? (
+            <li key={`day-note-${index}`}>
+              {format(addDays(timesheet.weekStarting, index), "EEE")}: {note}
             </li>
           ) : null,
         )}
@@ -62,26 +64,53 @@ const getDayNotes = (timesheet: Timesheet) => {
 
 // Add a function to display time details
 const getTimeDetails = (timesheet: Timesheet) => {
-  const daysWithDetails = timesheet.details.filter((detail) => detail.use_detailed_time)
+  if (!timesheet.timeDetails) return null
+
+  const daysWithDetails = timesheet.timeDetails.filter((detail) => detail?.useDetailedTime)
   if (daysWithDetails.length === 0) return null
 
   return (
     <div className="mt-2 p-2 bg-gray-50 border rounded text-sm">
       <p className="font-medium">Time Details:</p>
       <ul className="list-disc pl-5 text-gray-600">
-        {timesheet.details.map((detail) =>
-          detail.use_detailed_time ? (
-            <li key={`${timesheet.uuid}-time-${detail.day}`}>
-              {format(addDays(new Date(timesheet.week_starting), detail.day), "EEE")}: {detail.start_time} - {detail.end_time}
-              {detail.break_minutes ? ` (${detail.break_minutes}min break)` : ""}
+        {timesheet.timeDetails.map((detail, index) =>
+          detail?.useDetailedTime ? (
+            <li key={`time-detail-${index}`}>
+              {format(addDays(timesheet.weekStarting, index), "EEE")}: {detail.startTime} - {detail.endTime}
+              {detail.breakMinutes ? ` (${detail.breakMinutes}min break)` : ""}
               {" = "}
-              {detail.hours.toFixed(2)} hours
+              {timesheet.hours[index].toFixed(2)} hours
             </li>
           ) : null,
         )}
       </ul>
     </div>
   )
+}
+
+const getTotalHours = (hours: any[]): string => {
+  if (!hours || !Array.isArray(hours)) return "0.00"
+
+  const total = hours.reduce((sum, hour) => {
+    // Ensure each hour is a valid number
+    const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+    return sum + validHour
+  }, 0)
+
+  return total.toFixed(2)
+}
+
+const DEFAULT_HOURLY_RATE = 25
+
+const calculatePaymentAmount = (hours: any[]): string => {
+  if (!hours || !Array.isArray(hours)) return "0.00"
+
+  const totalHours = hours.reduce((sum, hour) => {
+    const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+    return sum + validHour
+  }, 0)
+
+  return (totalHours * DEFAULT_HOURLY_RATE).toFixed(2)
 }
 
 export function TimesheetApproval({
@@ -98,9 +127,10 @@ export function TimesheetApproval({
   const [rejectionReason, setRejectionReason] = useState("")
   const [detailedViewTimesheet, setDetailedViewTimesheet] = useState<Timesheet | null>(null)
   const [activeTab, setActiveTab] = useState("pending")
+  const [undoApprovalDialogOpen, setUndoApprovalDialogOpen] = useState(false)
+  const [timesheetToUndoApproval, setTimesheetToUndoApproval] = useState<Timesheet | null>(null)
 
   // Default hourly rate for calculating payment amounts
-  const DEFAULT_HOURLY_RATE = 25
 
   const handleRejectClick = (timesheet: Timesheet) => {
     setSelectedTimesheet(timesheet)
@@ -110,10 +140,23 @@ export function TimesheetApproval({
 
   const handleRejectConfirm = () => {
     if (selectedTimesheet && rejectionReason.trim()) {
-      onReject(selectedTimesheet.uuid, rejectionReason)
+      onReject(selectedTimesheet.id, rejectionReason)
       setRejectDialogOpen(false)
       setSelectedTimesheet(null)
       setRejectionReason("")
+    }
+  }
+
+  const handleUndoApprovalClick = (timesheet: Timesheet) => {
+    setTimesheetToUndoApproval(timesheet)
+    setUndoApprovalDialogOpen(true)
+  }
+
+  const handleUndoApprovalConfirm = () => {
+    if (timesheetToUndoApproval) {
+      onUndoApproval(timesheetToUndoApproval.id)
+      setUndoApprovalDialogOpen(false)
+      setTimesheetToUndoApproval(null)
     }
   }
 
@@ -152,22 +195,11 @@ export function TimesheetApproval({
     setDetailedViewTimesheet(null)
   }
 
-  const getTotalHours = (details: Timesheet['details']) => {
-    return details.reduce((sum, detail) => sum + (detail.hours || 0), 0).toFixed(2)
-  }
-
-  // Calculate payment amount based on hours
-  const calculatePaymentAmount = (details: Timesheet['details']) => {
-    const totalHours = details.reduce((sum, detail) => sum + (detail.hours || 0), 0)
-    return (totalHours * DEFAULT_HOURLY_RATE).toFixed(2)
-  }
-
-  // Navigation between timesheets
   const navigateToNextTimesheet = () => {
     if (!detailedViewTimesheet) return
 
     const currentList = getCurrentTimesheetList()
-    const currentIndex = currentList.findIndex((ts) => ts.uuid === detailedViewTimesheet.uuid)
+    const currentIndex = currentList.findIndex((ts) => ts.id === detailedViewTimesheet.id)
 
     if (currentIndex < currentList.length - 1) {
       setDetailedViewTimesheet(currentList[currentIndex + 1])
@@ -178,7 +210,7 @@ export function TimesheetApproval({
     if (!detailedViewTimesheet) return
 
     const currentList = getCurrentTimesheetList()
-    const currentIndex = currentList.findIndex((ts) => ts.uuid === detailedViewTimesheet.uuid)
+    const currentIndex = currentList.findIndex((ts) => ts.id === detailedViewTimesheet.id)
 
     if (currentIndex > 0) {
       setDetailedViewTimesheet(currentList[currentIndex - 1])
@@ -186,22 +218,56 @@ export function TimesheetApproval({
   }
 
   // Get unique employees with approved, pending_payment, or paid timesheets
-  const employeesWithApprovedTimesheets = Array.from(
-    new Set(
+  const employeesWithApprovedTimesheets = [
+    ...new Set(
       timesheets
         .filter((ts) => ["approved", "pending_payment", "paid"].includes(ts.status))
-        .map((ts) => ts.user.name)
-    )
-  )
+        .map((ts) => ts.submittedBy),
+    ),
+  ]
+
+  // Helper function to get badge color based on status
+  function getStatusBadgeColor(status: string): string {
+    switch (status) {
+      case "submitted":
+        return "bg-yellow-500 hover:bg-yellow-600"
+      case "approved":
+        return "bg-green-500 hover:bg-green-600"
+      case "rejected":
+        return "bg-red-500 hover:bg-red-600"
+      case "paid":
+        return "bg-green-700 hover:bg-green-800"
+      case "pending_payment":
+        return "bg-blue-500 hover:bg-blue-600"
+      default:
+        return "bg-gray-500 hover:bg-gray-600"
+    }
+  }
+
+  // Helper function to format status for display
+  function formatStatus(status: string): string {
+    switch (status) {
+      case "pending_payment":
+        return "Pending Payment"
+      default:
+        return status.charAt(0).toUpperCase() + status.slice(1)
+    }
+  }
 
   // Detailed day-by-day breakdown view
   if (detailedViewTimesheet) {
     const currentList = getCurrentTimesheetList()
-    const currentIndex = currentList.findIndex((ts) => ts.uuid === detailedViewTimesheet.uuid)
+    const currentIndex = currentList.findIndex((ts) => ts.id === detailedViewTimesheet.id)
     const hasPrevious = currentIndex > 0
     const hasNext = currentIndex < currentList.length - 1
-    const totalHours = detailedViewTimesheet.details.reduce((sum, detail) => sum + detail.hours, 0)
-    const paymentAmount = totalHours * DEFAULT_HOURLY_RATE
+    const totalHoursCalc = Array.isArray(detailedViewTimesheet.hours)
+      ? detailedViewTimesheet.hours.reduce((sum, hour) => {
+          const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+          return sum + validHour
+        }, 0)
+      : 0
+    const totalHours = totalHoursCalc.toFixed(2)
+    const paymentAmount = Number.parseFloat(totalHours) * DEFAULT_HOURLY_RATE
 
     return (
       <div className="space-y-6">
@@ -211,8 +277,8 @@ export function TimesheetApproval({
             Back to List
           </Button>
           <h2 className="text-lg font-medium">
-            Timesheet - {detailedViewTimesheet.user.name} - Week of{" "}
-            {format(new Date(detailedViewTimesheet.week_starting), "d MMM, yyyy")}
+            Timesheet - {detailedViewTimesheet.submittedBy} - Week of{" "}
+            {format(detailedViewTimesheet.weekStarting, "d MMM, yyyy")}
           </h2>
           <Badge className={`ml-2 ${getStatusBadgeColor(detailedViewTimesheet.status)}`}>
             {formatStatus(detailedViewTimesheet.status)}
@@ -225,16 +291,16 @@ export function TimesheetApproval({
               <div>
                 <CardTitle>Timesheet Details</CardTitle>
                 <p className="text-sm text-gray-500 mt-1">
-                  Client: {detailedViewTimesheet.project.customer.name}
-                  {detailedViewTimesheet.project.name ? ` | Project: ${detailedViewTimesheet.project.name}` : ""}
+                  Client: {detailedViewTimesheet.clientName || "No client specified"}
+                  {detailedViewTimesheet.projectName ? ` | Project: ${detailedViewTimesheet.projectName}` : ""}
                 </p>
               </div>
               <div className="text-right">
-                <p className="font-medium">Total: {getTotalHours(detailedViewTimesheet.details)} hours</p>
+                <p className="font-medium">Total: {getTotalHours(detailedViewTimesheet.hours)} hours</p>
                 <p className="font-medium text-green-600">${paymentAmount.toFixed(2)}</p>
-                {detailedViewTimesheet.submitted_at && (
+                {detailedViewTimesheet.submittedAt && (
                   <p className="text-xs text-gray-500">
-                    Submitted: {format(new Date(detailedViewTimesheet.submitted_at), "d MMM yyyy, h:mm a")}
+                    Submitted: {format(detailedViewTimesheet.submittedAt, "d MMM yyyy, h:mm a")}
                   </p>
                 )}
               </div>
@@ -253,18 +319,20 @@ export function TimesheetApproval({
                   </tr>
                 </thead>
                 <tbody>
-                  {detailedViewTimesheet.details.map((detail, index) => {
-                    const date = addDays(new Date(detailedViewTimesheet.week_starting), index)
-                    const dayAmount = detail.hours * DEFAULT_HOURLY_RATE
+                  {detailedViewTimesheet.hours.map((hours, index) => {
+                    const date = addDays(detailedViewTimesheet.weekStarting, index)
+                    const dayAmount = hours * DEFAULT_HOURLY_RATE
                     return (
                       <tr key={index} className="border-t">
                         <td className="px-4 py-3 font-medium">{format(date, "EEEE")}</td>
                         <td className="px-4 py-3">{format(date, "d MMM yyyy")}</td>
-                        <td className="px-4 py-3 font-medium">{detail.hours.toFixed(2)}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {typeof hours === "number" ? hours.toFixed(2) : "0.00"}
+                        </td>
                         <td className="px-4 py-3 font-medium text-green-600">${dayAmount.toFixed(2)}</td>
                         <td className="px-4 py-3">
-                          {detail.note ? (
-                            <div className="text-sm">{detail.note}</div>
+                          {detailedViewTimesheet.dayNotes[index] ? (
+                            <div className="text-sm">{detailedViewTimesheet.dayNotes[index]}</div>
                           ) : (
                             <span className="text-gray-500 text-sm">No notes</span>
                           )}
@@ -276,7 +344,7 @@ export function TimesheetApproval({
                     <td colSpan={2} className="px-4 py-3 font-medium">
                       Total
                     </td>
-                    <td className="px-4 py-3 font-medium">{getTotalHours(detailedViewTimesheet.details)}</td>
+                    <td className="px-4 py-3 font-medium">{getTotalHours(detailedViewTimesheet.hours)}</td>
                     <td className="px-4 py-3 font-medium text-green-600">${paymentAmount.toFixed(2)}</td>
                     <td></td>
                   </tr>
@@ -304,7 +372,7 @@ export function TimesheetApproval({
                 <Button
                   variant="outline"
                   className="text-green-500"
-                  onClick={() => onApprove(detailedViewTimesheet.uuid)}
+                  onClick={() => onApprove(detailedViewTimesheet.id)}
                 >
                   <CheckCircle className="mr-1 h-4 w-4" />
                   Approve
@@ -317,7 +385,7 @@ export function TimesheetApproval({
                 <Button
                   variant="outline"
                   className="text-blue-500"
-                  onClick={() => onSendForPayment(detailedViewTimesheet.uuid)}
+                  onClick={() => onSendForPayment(detailedViewTimesheet.id)}
                 >
                   <CreditCard className="mr-1 h-4 w-4" />
                   Send for Payment
@@ -325,7 +393,7 @@ export function TimesheetApproval({
                 <Button
                   variant="outline"
                   className="text-amber-500"
-                  onClick={() => onUndoApproval(detailedViewTimesheet.uuid)}
+                  onClick={() => handleUndoApprovalClick(detailedViewTimesheet)}
                 >
                   <ArrowLeft className="mr-1 h-4 w-4" />
                   Undo Approval
@@ -338,7 +406,7 @@ export function TimesheetApproval({
                 <Button
                   variant="outline"
                   className="text-green-500"
-                  onClick={() => onMarkAsPaid(detailedViewTimesheet.uuid)}
+                  onClick={() => onMarkAsPaid(detailedViewTimesheet.id)}
                 >
                   <CircleDollarSign className="mr-1 h-4 w-4" />
                   Mark as Paid
@@ -385,13 +453,19 @@ export function TimesheetApproval({
           ) : (
             <div className="space-y-4">
               {pendingTimesheets.map((timesheet) => {
-                const totalHours = timesheet.details.reduce((sum, detail) => sum + detail.hours, 0)
-                const paymentAmount = totalHours * DEFAULT_HOURLY_RATE
+                const totalHoursCalc = Array.isArray(timesheet.hours)
+                  ? timesheet.hours.reduce((sum, hour) => {
+                      const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+                      return sum + validHour
+                    }, 0)
+                  : 0
+                const totalHours = totalHoursCalc.toFixed(2)
+                const paymentAmount = Number.parseFloat(totalHours) * DEFAULT_HOURLY_RATE
 
                 return (
-                  <Card key={timesheet.uuid} className="overflow-hidden">
+                  <Card key={timesheet.id} className="overflow-hidden">
                     <div className="flex justify-between items-center bg-gray-50 px-4 py-3 border-b">
-                      <div className="font-medium">Week of {format(new Date(timesheet.week_starting), "d MMM, yyyy")}</div>
+                      <div className="font-medium">Week of {format(timesheet.weekStarting, "d MMM, yyyy")}</div>
                       <Badge className="bg-yellow-500 hover:bg-yellow-600">Pending Approval</Badge>
                     </div>
                     <CardContent className="p-4">
@@ -399,14 +473,14 @@ export function TimesheetApproval({
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <User className="h-4 w-4 text-gray-500" />
-                            <p className="font-medium">{timesheet.user.name}</p>
+                            <p className="font-medium">{timesheet.submittedBy}</p>
                           </div>
                           <p>
-                            {timesheet.project.customer.name} / {timesheet.project.name}
+                            {timesheet.clientName || "No client"} / {timesheet.projectName || "No project"}
                           </p>
                           <div className="mt-2 flex items-center gap-4">
                             <p>
-                              <span className="font-medium">{getTotalHours(timesheet.details)}</span> hours
+                              <span className="font-medium">{getTotalHours(timesheet.hours)}</span> hours
                             </p>
                             <p className="font-medium text-green-600">${paymentAmount.toFixed(2)}</p>
                           </div>
@@ -429,7 +503,7 @@ export function TimesheetApproval({
                             variant="outline"
                             size="sm"
                             className="text-green-500"
-                            onClick={() => onApprove(timesheet.uuid)}
+                            onClick={() => onApprove(timesheet.id)}
                           >
                             <CheckCircle className="mr-1 h-4 w-4" />
                             Approve
@@ -454,13 +528,19 @@ export function TimesheetApproval({
           ) : (
             <div className="space-y-4">
               {approvedTimesheets.map((timesheet) => {
-                const totalHours = timesheet.details.reduce((sum, detail) => sum + detail.hours, 0)
-                const paymentAmount = totalHours * DEFAULT_HOURLY_RATE
+                const totalHoursCalc = Array.isArray(timesheet.hours)
+                  ? timesheet.hours.reduce((sum, hour) => {
+                      const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+                      return sum + validHour
+                    }, 0)
+                  : 0
+                const totalHours = totalHoursCalc.toFixed(2)
+                const paymentAmount = Number.parseFloat(totalHours) * DEFAULT_HOURLY_RATE
 
                 return (
-                  <Card key={timesheet.uuid} className="overflow-hidden">
+                  <Card key={timesheet.id} className="overflow-hidden">
                     <div className="flex justify-between items-center bg-gray-50 px-4 py-3 border-b">
-                      <div className="font-medium">Week of {format(new Date(timesheet.week_starting), "d MMM, yyyy")}</div>
+                      <div className="font-medium">Week of {format(timesheet.weekStarting, "d MMM, yyyy")}</div>
                       <Badge className="bg-green-500 hover:bg-green-600">Approved</Badge>
                     </div>
                     <CardContent className="p-4">
@@ -468,14 +548,14 @@ export function TimesheetApproval({
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <User className="h-4 w-4 text-gray-500" />
-                            <p className="font-medium">{timesheet.user.name}</p>
+                            <p className="font-medium">{timesheet.submittedBy}</p>
                           </div>
                           <p>
-                            {timesheet.project.customer.name} / {timesheet.project.name}
+                            {timesheet.clientName || "No client"} / {timesheet.projectName || "No project"}
                           </p>
                           <div className="mt-2 flex items-center gap-4">
                             <p>
-                              <span className="font-medium">{getTotalHours(timesheet.details)}</span> hours
+                              <span className="font-medium">{getTotalHours(timesheet.hours)}</span> hours
                             </p>
                             <p className="font-medium text-green-600">${paymentAmount.toFixed(2)}</p>
                           </div>
@@ -489,18 +569,19 @@ export function TimesheetApproval({
                             variant="outline"
                             size="sm"
                             className="text-blue-500"
-                            onClick={() => onSendForPayment(timesheet.uuid)}
+                            onClick={() => onSendForPayment(timesheet.id)}
                           >
                             <CreditCard className="mr-1 h-4 w-4" />
                             Send for Payment
                           </Button>
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             className="text-amber-500"
-                            onClick={() => onUndoApproval(timesheet.uuid)}
+                            onClick={() => handleUndoApprovalClick(timesheet)}
                           >
-                            <ArrowLeft className="h-4 w-4" />
+                            <ArrowLeft className="h-4 w-4 mr-1" />
+                            Undo Approval
                           </Button>
                         </div>
                       </div>
@@ -522,13 +603,19 @@ export function TimesheetApproval({
           ) : (
             <div className="space-y-4">
               {pendingPaymentTimesheets.map((timesheet) => {
-                const totalHours = timesheet.details.reduce((sum, detail) => sum + detail.hours, 0)
-                const paymentAmount = totalHours * DEFAULT_HOURLY_RATE
+                const totalHoursCalc = Array.isArray(timesheet.hours)
+                  ? timesheet.hours.reduce((sum, hour) => {
+                      const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+                      return sum + validHour
+                    }, 0)
+                  : 0
+                const totalHours = totalHoursCalc.toFixed(2)
+                const paymentAmount = Number.parseFloat(totalHours) * DEFAULT_HOURLY_RATE
 
                 return (
-                  <Card key={timesheet.uuid} className="overflow-hidden">
+                  <Card key={timesheet.id} className="overflow-hidden">
                     <div className="flex justify-between items-center bg-gray-50 px-4 py-3 border-b">
-                      <div className="font-medium">Week of {format(new Date(timesheet.week_starting), "d MMM, yyyy")}</div>
+                      <div className="font-medium">Week of {format(timesheet.weekStarting, "d MMM, yyyy")}</div>
                       <Badge className="bg-blue-500 hover:bg-blue-600">Pending Payment</Badge>
                     </div>
                     <CardContent className="p-4">
@@ -536,14 +623,14 @@ export function TimesheetApproval({
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <User className="h-4 w-4 text-gray-500" />
-                            <p className="font-medium">{timesheet.user.name}</p>
+                            <p className="font-medium">{timesheet.submittedBy}</p>
                           </div>
                           <p>
-                            {timesheet.project.customer.name} / {timesheet.project.name}
+                            {timesheet.clientName || "No client"} / {timesheet.projectName || "No project"}
                           </p>
                           <div className="mt-2 flex items-center gap-4">
                             <p>
-                              <span className="font-medium">{getTotalHours(timesheet.details)}</span> hours
+                              <span className="font-medium">{getTotalHours(timesheet.hours)}</span> hours
                             </p>
                             <p className="font-medium text-green-600">${paymentAmount.toFixed(2)}</p>
                           </div>
@@ -557,7 +644,7 @@ export function TimesheetApproval({
                             variant="outline"
                             size="sm"
                             className="text-green-500"
-                            onClick={() => onMarkAsPaid(timesheet.uuid)}
+                            onClick={() => onMarkAsPaid(timesheet.id)}
                           >
                             <CircleDollarSign className="mr-1 h-4 w-4" />
                             Mark as Paid
@@ -582,34 +669,40 @@ export function TimesheetApproval({
           ) : (
             <div className="space-y-4">
               {paidTimesheets.map((timesheet) => {
-                const totalHours = timesheet.details.reduce((sum, detail) => sum + detail.hours, 0)
-                const paymentAmount = totalHours * DEFAULT_HOURLY_RATE
+                const totalHoursCalc = Array.isArray(timesheet.hours)
+                  ? timesheet.hours.reduce((sum, hour) => {
+                      const validHour = typeof hour === "number" && !isNaN(hour) ? hour : 0
+                      return sum + validHour
+                    }, 0)
+                  : 0
+                const totalHours = totalHoursCalc.toFixed(2)
+                const paymentAmount = Number.parseFloat(totalHours) * DEFAULT_HOURLY_RATE
 
                 return (
-                  <Card key={timesheet.uuid} className="overflow-hidden">
+                  <Card key={timesheet.id} className="overflow-hidden">
                     <div className="flex justify-between items-center bg-gray-50 px-4 py-3 border-b">
-                      <div className="font-medium">Week of {format(new Date(timesheet.week_starting), "d MMM, yyyy")}</div>
-                      <Badge className="bg-purple-500 hover:bg-purple-600">Paid</Badge>
+                      <div className="font-medium">Week of {format(timesheet.weekStarting, "d MMM, yyyy")}</div>
+                      <Badge className="bg-green-700 hover:bg-green-800">Paid</Badge>
                     </div>
                     <CardContent className="p-4">
                       <div className="flex justify-between items-start">
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <User className="h-4 w-4 text-gray-500" />
-                            <p className="font-medium">{timesheet.user.name}</p>
+                            <p className="font-medium">{timesheet.submittedBy}</p>
                           </div>
                           <p>
-                            {timesheet.project.customer.name} / {timesheet.project.name}
+                            {timesheet.clientName || "No client"} / {timesheet.projectName || "No project"}
                           </p>
                           <div className="mt-2 flex items-center gap-4">
                             <p>
-                              <span className="font-medium">{getTotalHours(timesheet.details)}</span> hours
+                              <span className="font-medium">{getTotalHours(timesheet.hours)}</span> hours
                             </p>
                             <p className="font-medium text-green-600">${paymentAmount.toFixed(2)}</p>
                           </div>
-                          {timesheet.paid_at && (
+                          {timesheet.paidAt && (
                             <p className="text-xs text-gray-500 mt-1">
-                              Paid on {format(new Date(timesheet.paid_at), "d MMM yyyy")}
+                              Paid on {format(timesheet.paidAt, "d MMM yyyy")}
                             </p>
                           )}
                         </div>
@@ -622,7 +715,7 @@ export function TimesheetApproval({
                             variant="outline"
                             size="sm"
                             className="text-blue-500"
-                            onClick={() => onViewInvoice(timesheet.user.name)}
+                            onClick={() => onViewInvoice(timesheet.submittedBy)}
                           >
                             <FileText className="mr-1 h-4 w-4" />
                             Invoice
@@ -672,20 +765,26 @@ export function TimesheetApproval({
                         {employeesWithApprovedTimesheets.map((employee) => {
                           const employeeTimesheets = timesheets.filter(
                             (ts) =>
-                              ts.user.name === employee &&
+                              ts.submittedBy === employee &&
                               ["approved", "pending_payment", "paid"].includes(ts.status),
                           )
-                          const totalHours = employeeTimesheets.reduce(
-                            (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
+                          const totalHoursCalc = employeeTimesheets.reduce(
+                            (sum, ts) =>
+                              sum +
+                              ts.hours.reduce((h, v) => {
+                                const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                return h + validHour
+                              }, 0),
                             0,
                           )
-                          const totalAmount = totalHours * DEFAULT_HOURLY_RATE
+                          const totalHours = totalHoursCalc.toFixed(2)
+                          const totalAmount = Number.parseFloat(totalHours) * DEFAULT_HOURLY_RATE
 
                           return (
                             <tr key={employee} className="border-b">
                               <td className="px-4 py-3 font-medium">{employee}</td>
                               <td className="px-4 py-3">{employeeTimesheets.length}</td>
-                              <td className="px-4 py-3">{totalHours.toFixed(2)} hours</td>
+                              <td className="px-4 py-3">{totalHours} hours</td>
                               <td className="px-4 py-3 font-medium text-green-600">${totalAmount.toFixed(2)}</td>
                               <td className="px-4 py-3 text-right">
                                 <Button
@@ -717,7 +816,15 @@ export function TimesheetApproval({
                         <div className="flex justify-between items-center mt-1">
                           <p className="text-sm text-gray-600">
                             {approvedTimesheets
-                              .reduce((sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0), 0)
+                              .reduce(
+                                (sum, ts) =>
+                                  sum +
+                                  ts.hours.reduce((h, v) => {
+                                    const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                    return h + validHour
+                                  }, 0),
+                                0,
+                              )
                               .toFixed(2)}{" "}
                             hours
                           </p>
@@ -725,8 +832,13 @@ export function TimesheetApproval({
                             $
                             {(
                               approvedTimesheets.reduce(
-                                (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
-                                0
+                                (sum, ts) =>
+                                  sum +
+                                  ts.hours.reduce((h, v) => {
+                                    const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                    return h + validHour
+                                  }, 0),
+                                0,
                               ) * DEFAULT_HOURLY_RATE
                             ).toFixed(2)}
                           </p>
@@ -742,7 +854,15 @@ export function TimesheetApproval({
                         <div className="flex justify-between items-center mt-1">
                           <p className="text-sm text-gray-600">
                             {pendingPaymentTimesheets
-                              .reduce((sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0), 0)
+                              .reduce(
+                                (sum, ts) =>
+                                  sum +
+                                  ts.hours.reduce((h, v) => {
+                                    const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                    return h + validHour
+                                  }, 0),
+                                0,
+                              )
                               .toFixed(2)}{" "}
                             hours
                           </p>
@@ -750,8 +870,13 @@ export function TimesheetApproval({
                             $
                             {(
                               pendingPaymentTimesheets.reduce(
-                                (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
-                                0
+                                (sum, ts) =>
+                                  sum +
+                                  ts.hours.reduce((h, v) => {
+                                    const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                    return h + validHour
+                                  }, 0),
+                                0,
                               ) * DEFAULT_HOURLY_RATE
                             ).toFixed(2)}
                           </p>
@@ -767,7 +892,15 @@ export function TimesheetApproval({
                         <div className="flex justify-between items-center mt-1">
                           <p className="text-sm text-gray-600">
                             {paidTimesheets
-                              .reduce((sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0), 0)
+                              .reduce(
+                                (sum, ts) =>
+                                  sum +
+                                  ts.hours.reduce((h, v) => {
+                                    const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                    return h + validHour
+                                  }, 0),
+                                0,
+                              )
                               .toFixed(2)}{" "}
                             hours
                           </p>
@@ -775,8 +908,13 @@ export function TimesheetApproval({
                             $
                             {(
                               paidTimesheets.reduce(
-                                (sum, ts) => sum + ts.details.reduce((h, detail) => h + (detail.hours || 0), 0),
-                                0
+                                (sum, ts) =>
+                                  sum +
+                                  ts.hours.reduce((h, v) => {
+                                    const validHour = typeof v === "number" && !isNaN(v) ? v : 0
+                                    return h + validHour
+                                  }, 0),
+                                0,
                               ) * DEFAULT_HOURLY_RATE
                             ).toFixed(2)}
                           </p>
@@ -797,12 +935,18 @@ export function TimesheetApproval({
             <DialogTitle>Reject Timesheet</DialogTitle>
             <DialogDescription>Please provide a reason for rejecting this timesheet.</DialogDescription>
           </DialogHeader>
-          <Textarea
-            placeholder="Enter rejection reason"
-            value={rejectionReason}
-            onChange={(e) => setRejectionReason(e.target.value)}
-            className="min-h-[100px]"
-          />
+          <div className="py-4">
+            <div className="space-y-2">
+              <Label htmlFor="rejection-reason">Rejection Reason</Label>
+              <Textarea
+                id="rejection-reason"
+                placeholder="Enter rejection reason"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                className="min-h-[100px]"
+              />
+            </div>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>
               Cancel
@@ -813,34 +957,25 @@ export function TimesheetApproval({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={undoApprovalDialogOpen} onOpenChange={setUndoApprovalDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Undo Timesheet Approval</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to undo the approval for this timesheet? This will change the status back to
+              "Submitted".
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUndoApprovalDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="default" onClick={handleUndoApprovalConfirm}>
+              Confirm Undo Approval
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
-}
-
-// Helper function to get badge color based on status
-function getStatusBadgeColor(status: string): string {
-  switch (status) {
-    case "submitted":
-      return "bg-yellow-500 hover:bg-yellow-600"
-    case "approved":
-      return "bg-green-500 hover:bg-green-600"
-    case "rejected":
-      return "bg-red-500 hover:bg-red-600"
-    case "paid":
-      return "bg-purple-500 hover:bg-purple-600"
-    case "pending_payment":
-      return "bg-blue-500 hover:bg-blue-600"
-    default:
-      return "bg-gray-500 hover:bg-gray-600"
-  }
-}
-
-// Helper function to format status for display
-function formatStatus(status: string): string {
-  switch (status) {
-    case "pending_payment":
-      return "Pending Payment"
-    default:
-      return status.charAt(0).toUpperCase() + status.slice(1)
-  }
 }

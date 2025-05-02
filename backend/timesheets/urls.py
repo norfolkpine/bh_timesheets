@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CustomerViewSet, ProjectViewSet, TimesheetViewSet, 
     TimesheetDetailViewSet, EmployeeProfileViewSet, AuditLogViewSet,
-    RateHistoryViewSet
+    RateHistoryViewSet, InvoiceViewSet
 )
 from . import views
 
@@ -15,6 +15,7 @@ router.register(r'timesheet-details', TimesheetDetailViewSet, basename='timeshee
 router.register(r'employees', EmployeeProfileViewSet, basename='employee-profile')
 router.register(r'audit-logs', AuditLogViewSet, basename='audit-log')
 router.register(r'rate-history', RateHistoryViewSet, basename='rate-history')
+router.register(r'invoices', InvoiceViewSet, basename='invoice')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -5,7 +5,9 @@ import { BarChart, Calendar, Clock, CheckCircle, XCircle, Clock3, CircleDollarSi
 import type { Timesheet } from "./simple-timesheet"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { startOfMonth, endOfMonth, isWithinInterval } from "date-fns"
+import { startOfMonth } from "date-fns/startOfMonth"
+import { endOfMonth } from "date-fns/endOfMonth"
+import { isWithinInterval } from "date-fns/isWithinInterval"
 
 interface TimesheetSummaryProps {
   timesheets: Timesheet[]
@@ -13,9 +15,26 @@ interface TimesheetSummaryProps {
 }
 
 export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProps) {
+  // Ensure timesheets is always an array
+  const safeTimesheets = Array.isArray(timesheets) ? timesheets : []
+
   const totalHours = useMemo(
-    () => timesheets.reduce((sum, entry) => sum + entry.hours.reduce((h, v) => h + v, 0), 0),
-    [timesheets],
+    () =>
+      safeTimesheets.reduce((sum, entry) => {
+        // Check if hours exists and is an array
+        if (!entry.hours || !Array.isArray(entry.hours)) {
+          return sum
+        }
+        return (
+          sum +
+          entry.hours.reduce((h, v) => {
+            // Ensure v is a number
+            const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+            return h + validValue
+          }, 0)
+        )
+      }, 0),
+    [safeTimesheets],
   )
 
   // Calculate total hours for the current month
@@ -24,73 +43,252 @@ export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProp
     const monthStart = startOfMonth(now)
     const monthEnd = endOfMonth(now)
 
-    return timesheets
-      .filter((timesheet) => isWithinInterval(timesheet.weekStarting, { start: monthStart, end: monthEnd }))
-      .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0)
-  }, [timesheets])
+    return safeTimesheets
+      .filter((timesheet) => {
+        // Ensure weekStarting is a valid date
+        if (!(timesheet.weekStarting instanceof Date) || isNaN(timesheet.weekStarting.getTime())) {
+          return false
+        }
+        return isWithinInterval(timesheet.weekStarting, { start: monthStart, end: monthEnd })
+      })
+      .reduce((sum, timesheet) => {
+        // Check if hours exists and is an array
+        if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+          return sum
+        }
+        return (
+          sum +
+          timesheet.hours.reduce((h, v) => {
+            // Ensure v is a number
+            const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+            return h + validValue
+          }, 0)
+        )
+      }, 0)
+  }, [safeTimesheets])
 
   const projectHours = useMemo(() => {
     const hours: Record<string, number> = {}
-    timesheets.forEach((timesheet) => {
+    safeTimesheets.forEach((timesheet) => {
+      // Skip if hours is not an array
+      if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+        return
+      }
+
       const client = timesheet.client || "Unspecified"
-      hours[client] = (hours[client] || 0) + timesheet.hours.reduce((sum, h) => sum + h, 0)
+      hours[client] =
+        (hours[client] || 0) +
+        timesheet.hours.reduce((sum, h) => {
+          // Ensure h is a number
+          const validValue = typeof h === "number" && !isNaN(h) ? h : 0
+          return sum + validValue
+        }, 0)
     })
     return Object.entries(hours)
       .map(([client, hours]) => ({ client, hours }))
       .sort((a, b) => b.hours - a.hours)
-  }, [timesheets])
+  }, [safeTimesheets])
 
   const weeklyHours = useMemo(() => {
     const now = new Date()
     const oneWeekAgo = new Date(now)
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
 
-    return timesheets
-      .filter((timesheet) => timesheet.weekStarting >= oneWeekAgo)
-      .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0)
-  }, [timesheets])
+    return safeTimesheets
+      .filter((timesheet) => {
+        // Ensure weekStarting is a valid date
+        if (!(timesheet.weekStarting instanceof Date) || isNaN(timesheet.weekStarting.getTime())) {
+          return false
+        }
+        return timesheet.weekStarting >= oneWeekAgo
+      })
+      .reduce((sum, timesheet) => {
+        // Check if hours exists and is an array
+        if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+          return sum
+        }
+        return (
+          sum +
+          timesheet.hours.reduce((h, v) => {
+            // Ensure v is a number
+            const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+            return h + validValue
+          }, 0)
+        )
+      }, 0)
+  }, [safeTimesheets])
 
   const approvalStats = useMemo(() => {
     const stats = {
-      draft: timesheets.filter((timesheet) => timesheet.status === "draft").length,
-      submitted: timesheets.filter((timesheet) => timesheet.status === "submitted").length,
-      approved: timesheets.filter((timesheet) => timesheet.status === "approved").length,
-      rejected: timesheets.filter((timesheet) => timesheet.status === "rejected").length,
-      pending_payment: timesheets.filter((timesheet) => timesheet.status === "pending_payment").length,
-      paid: timesheets.filter((timesheet) => timesheet.status === "paid").length,
-      draftHours: timesheets
+      draft: safeTimesheets.filter((timesheet) => timesheet.status === "draft").length,
+      submitted: safeTimesheets.filter((timesheet) => timesheet.status === "submitted").length,
+      approved: safeTimesheets.filter((timesheet) => timesheet.status === "approved").length,
+      rejected: safeTimesheets.filter((timesheet) => timesheet.status === "rejected").length,
+      pending_payment: safeTimesheets.filter((timesheet) => timesheet.status === "pending_payment").length,
+      paid: safeTimesheets.filter((timesheet) => timesheet.status === "paid").length,
+      draftHours: safeTimesheets
         .filter((timesheet) => timesheet.status === "draft")
-        .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0),
-      submittedHours: timesheets
+        .reduce((sum, timesheet) => {
+          // Check if hours exists and is an array
+          if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+            return sum
+          }
+          return (
+            sum +
+            timesheet.hours.reduce((h, v) => {
+              // Ensure v is a number
+              const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+              return h + validValue
+            }, 0)
+          )
+        }, 0),
+      submittedHours: safeTimesheets
         .filter((timesheet) => timesheet.status === "submitted")
-        .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0),
-      approvedHours: timesheets
+        .reduce((sum, timesheet) => {
+          // Check if hours exists and is an array
+          if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+            return sum
+          }
+          return (
+            sum +
+            timesheet.hours.reduce((h, v) => {
+              // Ensure v is a number
+              const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+              return h + validValue
+            }, 0)
+          )
+        }, 0),
+      approvedHours: safeTimesheets
         .filter((timesheet) => timesheet.status === "approved")
-        .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0),
-      rejectedHours: timesheets
+        .reduce((sum, timesheet) => {
+          // Check if hours exists and is an array
+          if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+            return sum
+          }
+          return (
+            sum +
+            timesheet.hours.reduce((h, v) => {
+              // Ensure v is a number
+              const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+              return h + validValue
+            }, 0)
+          )
+        }, 0),
+      rejectedHours: safeTimesheets
         .filter((timesheet) => timesheet.status === "rejected")
-        .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0),
-      pending_paymentHours: timesheets
+        .reduce((sum, timesheet) => {
+          // Check if hours exists and is an array
+          if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+            return sum
+          }
+          return (
+            sum +
+            timesheet.hours.reduce((h, v) => {
+              // Ensure v is a number
+              const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+              return h + validValue
+            }, 0)
+          )
+        }, 0),
+      pending_paymentHours: safeTimesheets
         .filter((timesheet) => timesheet.status === "pending_payment")
-        .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0),
-      paidHours: timesheets
+        .reduce((sum, timesheet) => {
+          // Check if hours exists and is an array
+          if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+            return sum
+          }
+          return (
+            sum +
+            timesheet.hours.reduce((h, v) => {
+              // Ensure v is a number
+              const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+              return h + validValue
+            }, 0)
+          )
+        }, 0),
+      paidHours: safeTimesheets
         .filter((timesheet) => timesheet.status === "paid")
-        .reduce((sum, timesheet) => sum + timesheet.hours.reduce((h, v) => h + v, 0), 0),
+        .reduce((sum, timesheet) => {
+          // Check if hours exists and is an array
+          if (!timesheet.hours || !Array.isArray(timesheet.hours)) {
+            return sum
+          }
+          return (
+            sum +
+            timesheet.hours.reduce((h, v) => {
+              // Ensure v is a number
+              const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+              return h + validValue
+            }, 0)
+          )
+        }, 0),
     }
     return stats
-  }, [timesheets])
+  }, [safeTimesheets])
 
   // Get unique employees
   const employees = useMemo(() => {
     const uniqueEmployees = new Set<string>()
-    timesheets.forEach((timesheet) => {
-      uniqueEmployees.add(timesheet.submittedBy)
+    safeTimesheets.forEach((timesheet) => {
+      if (timesheet.submittedBy) {
+        uniqueEmployees.add(timesheet.submittedBy)
+      }
     })
     return Array.from(uniqueEmployees)
-  }, [timesheets])
+  }, [safeTimesheets])
 
   // Get current month name
   const currentMonthName = new Date().toLocaleString("default", { month: "long" })
+
+  const getEmployeeTimesheetData = (employee: string) => {
+    const employeeTimesheets = safeTimesheets.filter((ts) => ts.submittedBy === employee)
+    const totalEmployeeHours = employeeTimesheets.reduce((sum, ts) => {
+      if (!ts.hours || !Array.isArray(ts.hours)) {
+        return sum
+      }
+      return (
+        sum +
+        ts.hours.reduce((h, v) => {
+          const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+          return h + validValue
+        }, 0)
+      )
+    }, 0)
+
+    const employeeCurrentMonthHours = employeeTimesheets
+      .filter((timesheet) => {
+        if (!(timesheet.weekStarting instanceof Date) || isNaN(timesheet.weekStarting.getTime())) {
+          return false
+        }
+        const now = new Date()
+        const monthStart = startOfMonth(now)
+        const monthEnd = endOfMonth(now)
+        return isWithinInterval(timesheet.weekStarting, { start: monthStart, end: monthEnd })
+      })
+      .reduce((sum, ts) => {
+        if (!ts.hours || !Array.isArray(ts.hours)) {
+          return sum
+        }
+        return (
+          sum +
+          ts.hours.reduce((h, v) => {
+            const validValue = typeof v === "number" && !isNaN(v) ? v : 0
+            return h + validValue
+          }, 0)
+        )
+      }, 0)
+
+    const approvedTimesheetsCount = employeeTimesheets.filter((ts) =>
+      ["approved", "pending_payment", "paid"].includes(ts.status),
+    ).length
+
+    return {
+      totalEmployeeHours,
+      employeeCurrentMonthHours,
+      approvedTimesheetsCount,
+      timesheetCount: employeeTimesheets.length,
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -128,7 +326,7 @@ export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProp
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {timesheets.length}
+              {safeTimesheets.length}
               <span className="text-sm font-normal text-muted-foreground ml-1">timesheets</span>
             </div>
           </CardContent>
@@ -195,7 +393,7 @@ export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProp
         </CardContent>
       </Card>
 
-      {timesheets.length > 0 && (
+      {safeTimesheets.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Hours by Client</CardTitle>
@@ -208,10 +406,10 @@ export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProp
                   <div className="flex items-center justify-between">
                     <div className="font-medium">{client}</div>
                     <div className="text-sm text-muted-foreground">
-                      {hours.toFixed(1)} hours ({((hours / totalHours) * 100).toFixed(0)}%)
+                      {hours.toFixed(1)} hours ({((hours / (totalHours || 1)) * 100).toFixed(0)}%)
                     </div>
                   </div>
-                  <Progress value={(hours / totalHours) * 100} className="h-2" />
+                  <Progress value={(hours / (totalHours || 1)) * 100} className="h-2" />
                 </div>
               ))}
             </div>
@@ -228,27 +426,14 @@ export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProp
           <CardContent>
             <div className="space-y-4">
               {employees.map((employee) => {
-                const employeeTimesheets = timesheets.filter((ts) => ts.submittedBy === employee)
-                const totalEmployeeHours = employeeTimesheets.reduce(
-                  (sum, ts) => sum + ts.hours.reduce((h, v) => h + v, 0),
-                  0,
-                )
-
-                // Calculate employee hours for current month
-                const employeeCurrentMonthHours = employeeTimesheets
-                  .filter((timesheet) => {
-                    const now = new Date()
-                    const monthStart = startOfMonth(now)
-                    const monthEnd = endOfMonth(now)
-                    return isWithinInterval(timesheet.weekStarting, { start: monthStart, end: monthEnd })
-                  })
-                  .reduce((sum, ts) => sum + ts.hours.reduce((h, v) => h + v, 0), 0)
+                const { totalEmployeeHours, employeeCurrentMonthHours, approvedTimesheetsCount, timesheetCount } =
+                  getEmployeeTimesheetData(employee)
 
                 return (
                   <div key={employee} className="flex justify-between items-center border-b pb-2">
                     <div>
                       <div className="font-medium">{employee}</div>
-                      <div className="text-sm text-gray-500">{employeeTimesheets.length} timesheets</div>
+                      <div className="text-sm text-gray-500">{timesheetCount} timesheets</div>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
@@ -257,13 +442,7 @@ export function TimesheetSummary({ timesheets, isManager }: TimesheetSummaryProp
                           {employeeCurrentMonthHours.toFixed(1)} this month
                         </div>
                       </div>
-                      <div className="text-sm text-gray-500">
-                        {
-                          employeeTimesheets.filter((ts) => ["approved", "pending_payment", "paid"].includes(ts.status))
-                            .length
-                        }{" "}
-                        approved
-                      </div>
+                      <div className="text-sm text-gray-500">{approvedTimesheetsCount} approved</div>
                     </div>
                   </div>
                 )

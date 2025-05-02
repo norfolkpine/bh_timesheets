@@ -3,6 +3,8 @@ from django.conf import settings
 import uuid
 from decimal import Decimal
 from django.contrib.auth.models import User
+from datetime import timedelta
+from django.utils import timezone
 
 # Create your models here.
 
@@ -60,13 +62,13 @@ class Timesheet(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     total_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     notes = models.TextField(blank=True, null=True)
-    submitted_at = models.DateTimeField(blank=True, null=True)
+    submitted_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, blank=True, null=True, related_name="approved_timesheets")
-    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     rejection_reason = models.TextField(blank=True, null=True)
-    sent_for_payment_at = models.DateTimeField(blank=True, null=True)
+    sent_for_payment_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     sent_for_payment_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, blank=True, null=True, related_name="sent_for_payment_timesheets")
-    paid_at = models.DateTimeField(blank=True, null=True)
+    paid_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     paid_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, blank=True, null=True, related_name="paid_timesheets")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -145,6 +147,7 @@ class TimesheetDetail(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
     timesheet = models.ForeignKey(Timesheet, on_delete=models.CASCADE, related_name="details")
     day = models.PositiveSmallIntegerField()  # 0=Monday, 6=Sunday
+    date = models.DateField()  # The actual date for this timesheet detail
     hours = models.DecimalField(max_digits=4, decimal_places=2, blank=True, null=True)
     start_time = models.TimeField(blank=True, null=True)
     end_time = models.TimeField(blank=True, null=True)
@@ -165,6 +168,11 @@ class TimesheetDetail(models.Model):
             break_minutes = self.break_minutes or 0
             total_minutes = end_minutes - start_minutes - break_minutes
             self.hours = Decimal(str(total_minutes / 60))
+        
+        # Calculate the date based on week_starting and day if not set
+        if not self.date and self.timesheet:
+            # Convert day (0-6) to timedelta days (0-6)
+            self.date = self.timesheet.week_starting + timedelta(days=self.day)
         
         # Save the detail
         super().save(*args, **kwargs)
@@ -293,3 +301,96 @@ class RateHistory(models.Model):
                     effective_to__isnull=True
                 ).update(effective_to=self.effective_from)
         super().save(*args, **kwargs)
+
+class Invoice(models.Model):
+    """Stores invoice data separately from timesheets for historical accuracy"""
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
+    invoice_number = models.CharField(max_length=50, unique=True)
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="invoices")
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="invoices")
+    
+    # Invoice period
+    start_date = models.DateField()
+    end_date = models.DateField()
+    
+    # Financial data
+    total_hours = models.DecimalField(max_digits=10, decimal_places=2)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    daily_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    fixed_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    retainer_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    
+    # Status tracking
+    STATUS_CHOICES = [
+        ("draft", "Draft"),
+        ("sent", "Sent"),
+        ("paid", "Paid"),
+        ("overdue", "Overdue"),
+        ("cancelled", "Cancelled"),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    
+    # Dates
+    due_date = models.DateField()
+    sent_date = models.DateTimeField(null=True, blank=True)
+    paid_date = models.DateTimeField(null=True, blank=True)
+    
+    # Related timesheets
+    timesheets = models.ManyToManyField(Timesheet, related_name="invoices")
+    
+    # Additional information
+    notes = models.TextField(blank=True, null=True)
+    terms = models.TextField(blank=True, null=True)
+    
+    # Audit fields
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="created_invoices")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['invoice_number']),
+            models.Index(fields=['status']),
+            models.Index(fields=['due_date']),
+        ]
+
+    def __str__(self):
+        return f"Invoice {self.invoice_number} - {self.customer.name}"
+
+    def save(self, *args, **kwargs):
+        # Generate invoice number if not provided
+        if not self.invoice_number:
+            last_invoice = Invoice.objects.order_by('-created_at').first()
+            if last_invoice:
+                last_number = int(last_invoice.invoice_number.split('-')[-1])
+                self.invoice_number = f"INV-{str(last_number + 1).zfill(6)}"
+            else:
+                self.invoice_number = f"INV-{str(1).zfill(6)}"
+        super().save(*args, **kwargs)
+
+    @property
+    def is_overdue(self):
+        """Check if the invoice is overdue"""
+        if self.status in ['paid', 'cancelled']:
+            return False
+        return timezone.now().date() > self.due_date
+
+    def mark_as_sent(self):
+        """Mark invoice as sent"""
+        self.status = 'sent'
+        self.sent_date = timezone.now()
+        self.save(update_fields=['status', 'sent_date'])
+
+    def mark_as_paid(self):
+        """Mark invoice as paid"""
+        self.status = 'paid'
+        self.paid_date = timezone.now()
+        self.save(update_fields=['status', 'paid_date'])
+
+    def mark_as_overdue(self):
+        """Mark invoice as overdue"""
+        if self.status not in ['paid', 'cancelled']:
+            self.status = 'overdue'
+            self.save(update_fields=['status'])

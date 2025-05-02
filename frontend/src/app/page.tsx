@@ -1,9 +1,12 @@
+"use client"
+
 import { SimpleTimesheet } from "@/components/simple-timesheet"
+import ProtectedRoute from "@/components/protected-route"
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ProtectedRoute>
       <SimpleTimesheet />
-    </div>
+    </ProtectedRoute>
   )
 }

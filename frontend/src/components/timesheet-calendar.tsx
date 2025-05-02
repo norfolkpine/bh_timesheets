@@ -1,17 +1,15 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import {
-  format,
-  startOfMonth,
-  endOfMonth,
-  eachDayOfInterval,
-  isSameMonth,
-  addMonths,
-  subMonths,
-  getDay,
-  addDays,
-} from "date-fns"
+import { format } from "date-fns/format"
+import { startOfMonth } from "date-fns/startOfMonth"
+import { endOfMonth } from "date-fns/endOfMonth"
+import { eachDayOfInterval } from "date-fns/eachDayOfInterval"
+import { isSameMonth } from "date-fns/isSameMonth"
+import { addMonths } from "date-fns/addMonths"
+import { subMonths } from "date-fns/subMonths"
+import { getDay } from "date-fns/getDay"
+import { addDays } from "date-fns/addDays"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import type { Timesheet } from "./simple-timesheet"
 import { Button } from "@/components/ui/button"

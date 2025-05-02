@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { TimesheetEntry } from "./timesheet-entry"
 import { TimesheetList } from "./timesheet-list"
 import { TimesheetApproval } from "./timesheet-approval"
@@ -11,8 +11,13 @@ import { CustomerManagement } from "./customer-management"
 import { ProjectManagement } from "./project-management"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
-import { startOfWeek, isSameDay, addWeeks } from "date-fns"
-import { Users, Building, Briefcase } from "lucide-react"
+import { startOfWeek } from "date-fns/startOfWeek"
+import { isSameDay } from "date-fns/isSameDay"
+import { Users, Building, Briefcase, LogOut } from "lucide-react"
+import { timesheetService } from "@/services/timesheet-service"
+import { useAuth } from "@/contexts/auth-context"
+import { useToast } from "@/hooks/use-toast"
+import { useRouter } from "next/navigation"
 
 export type TimesheetStatus = "draft" | "submitted" | "approved" | "rejected" | "paid" | "pending_payment"
 
@@ -25,23 +30,28 @@ export type User = {
 }
 
 export type TimeDetail = {
+  id?: string
   startTime?: string
   endTime?: string
   breakMinutes?: number
   useDetailedTime: boolean
+  timesheetId?: string
+  dayIndex?: number
 }
 
-export type Timesheet = {
+export interface Timesheet {
   id: string
-  weekStarting: Date
+  weekStarting: Date | string
   client: string
-  location: string // This is actually the project name
-  status: TimesheetStatus
+  clientName?: string
+  location: string
+  projectName?: string
+  status: string
   hours: number[]
-  timeDetails: TimeDetail[]
+  timeDetails?: TimeDetail[]
   dayNotes: string[]
   notes: string
-  submittedBy: string
+  submittedBy?: string
   submittedAt?: Date
   approvedBy?: string
   approvedAt?: Date
@@ -50,160 +60,87 @@ export type Timesheet = {
   sentForPaymentBy?: string
   paidAt?: Date
   paidBy?: string
+  totalHours?: number
+  totalAmount?: number
+  hourlyRate?: number | null
+  dailyRate?: number | null
+  fixedPrice?: number | null
+  retainerAmount?: number | null
 }
 
-// Create a base date for April 7, 2025
-const baseDate = new Date(2025, 3, 7)
-
-const INITIAL_TIMESHEETS: Timesheet[] = [
-  // Only one future timesheet (one week ahead)
-  {
-    id: "future-1",
-    weekStarting: addWeeks(baseDate, 1), // April 14, 2025
-    client: "",
-    location: "",
-    status: "draft",
-    hours: [0, 0, 0, 0, 0, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
-    dayNotes: ["", "", "", "", "", "", ""],
-    notes: "Future timesheet for next week",
-    submittedBy: "John Smith",
-  },
-  // Current timesheet
-  {
-    id: "1",
-    weekStarting: baseDate, // April 7, 2025
-    client: "ABC Company",
-    location: "Website Redesign",
-    status: "draft",
-    hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
-    dayNotes: ["", "", "", "", "", "", ""],
-    notes: "",
-    submittedBy: "John Smith",
-  },
-  // Past timesheets
-  {
-    id: "2",
-    weekStarting: new Date(2025, 2, 31), // March 31, 2025
-    client: "XYZ Corporation",
-    location: "Mobile App Development",
-    status: "submitted",
-    hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: [
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-    ],
-    dayNotes: ["Client meeting", "Development", "Development", "Testing", "Documentation", "", ""],
-    notes: "",
-    submittedBy: "John Smith",
-    submittedAt: new Date(2025, 3, 5),
-  },
-  {
-    id: "3",
-    weekStarting: new Date(2025, 2, 24), // March 24, 2025
-    client: "123 Industries",
-    location: "Database Migration",
-    status: "approved",
-    hours: [8, 8, 8, 8, 4, 0, 0],
-    timeDetails: [
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-      { startTime: "09:00", endTime: "13:00", breakMinutes: 0, useDetailedTime: true },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-    ],
-    dayNotes: ["", "", "", "", "Half day - doctor appointment", "", ""],
-    notes: "",
-    submittedBy: "Sarah Johnson",
-    submittedAt: new Date(2025, 2, 28),
-    approvedBy: "Michael Manager",
-    approvedAt: new Date(2025, 2, 29),
-  },
-  {
-    id: "4",
-    weekStarting: new Date(2025, 2, 17), // March 17, 2025
-    client: "Global Tech",
-    location: "Cloud Migration",
-    status: "pending_payment",
-    hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
-    dayNotes: ["", "", "", "", "", "", ""],
-    notes: "",
-    submittedBy: "Sarah Johnson",
-    submittedAt: new Date(2025, 2, 21),
-    approvedBy: "Michael Manager",
-    approvedAt: new Date(2025, 2, 22),
-    sentForPaymentAt: new Date(2025, 2, 23),
-    sentForPaymentBy: "Michael Manager",
-  },
-  {
-    id: "5",
-    weekStarting: new Date(2025, 2, 10), // March 10, 2025
-    client: "Local Services",
-    location: "Support & Maintenance",
-    status: "rejected",
-    hours: [8, 8, 4, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
-    dayNotes: ["", "", "Half day - doctor appointment", "", "", "", ""],
-    notes: "Worked half day on Wednesday due to doctor appointment",
-    submittedBy: "John Smith",
-    submittedAt: new Date(2025, 2, 14),
-    approvedBy: "Michael Manager",
-    approvedAt: new Date(2025, 2, 15),
-    rejectionReason: "Please provide documentation for the doctor appointment",
-  },
-  {
-    id: "6",
-    weekStarting: new Date(2025, 2, 3), // March 3, 2025
-    client: "Tech Solutions",
-    location: "API Integration",
-    status: "paid",
-    hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
-    dayNotes: ["", "", "", "", "", "", ""],
-    notes: "Completed all tasks ahead of schedule",
-    submittedBy: "John Smith",
-    submittedAt: new Date(2025, 2, 7),
-    approvedBy: "Michael Manager",
-    approvedAt: new Date(2025, 2, 8),
-    sentForPaymentAt: new Date(2025, 2, 9),
-    sentForPaymentBy: "Michael Manager",
-    paidAt: new Date(2025, 2, 12),
-    paidBy: "Finance Department",
-  },
-]
-
 export function SimpleTimesheet() {
-  const [timesheets, setTimesheets] = useState<Timesheet[]>(INITIAL_TIMESHEETS)
+  const [timesheets, setTimesheets] = useState<Timesheet[]>([])
   const [activeTab, setActiveTab] = useState("entries")
   const [editingTimesheet, setEditingTimesheet] = useState<Timesheet | null>(null)
   const [viewingInvoice, setViewingInvoice] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isCreating, setIsCreating] = useState(false)
+  const { user, logout } = useAuth()
+  const { toast } = useToast()
+  const router = useRouter()
 
-  // For demo purposes, toggle between employee and manager roles
-  const [currentUser, setCurrentUser] = useState<User>({
-    id: "user1",
-    name: "John Smith",
-    role: "employee",
-  })
+  // Use the authenticated user from the auth context
+  const currentUser: User = {
+    id: user?.id || "user1",
+    name: user?.name || "John Smith",
+    role: user?.role || "employee",
+  }
 
-  const toggleRole = () => {
-    setCurrentUser({
-      ...currentUser,
-      role: currentUser.role === "employee" ? "manager" : "employee",
-    })
-    // Reset to entries tab when switching roles
-    setActiveTab("entries")
-    setEditingTimesheet(null)
-    setViewingInvoice(false)
+  // Check if user is a manager
+  const isManager = currentUser.role === "manager"
+
+  useEffect(() => {
+    loadTimesheets()
+  }, [])
+
+  const loadTimesheets = async () => {
+    setIsLoading(true)
+    try {
+      const data = await timesheetService.getTimesheets()
+
+      // Ensure data is properly mapped to our frontend model
+      const mappedTimesheets = Array.isArray(data)
+        ? data.map((ts) => {
+            // If the timesheet doesn't have the expected structure, map it
+            if (!ts.hours || !Array.isArray(ts.hours) || !ts.timeDetails) {
+              return timesheetService.mapApiResponseToTimesheet(ts)
+            }
+            return ts
+          })
+        : []
+
+      setTimesheets(mappedTimesheets)
+    } catch (error) {
+      console.error("Failed to load timesheets:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load timesheets. Please try again.",
+        variant: "destructive",
+      })
+      // Initialize with empty array on error
+      setTimesheets([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await logout()
+      router.push("/login")
+      toast({
+        title: "Success",
+        description: "You have been logged out successfully",
+      })
+    } catch (error) {
+      console.error("Logout failed:", error)
+      toast({
+        title: "Error",
+        description: "Failed to log out. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
   const createNewTimesheet = (weekStartingDate?: Date) => {
@@ -212,16 +149,26 @@ export function SimpleTimesheet() {
     let monday: Date
 
     if (weekStartingDate) {
-      // Use the provided date (should already be a Monday)
-      monday = weekStartingDate
+      // Use the provided date but ensure it's a Monday
+      monday = new Date(weekStartingDate)
+      const day = monday.getDay() // 0 is Sunday, 1 is Monday, etc.
+      if (day !== 1) {
+        // If not Monday, adjust to the nearest Monday
+        const daysToSubtract = day === 0 ? 6 : day - 1
+        monday.setDate(monday.getDate() - daysToSubtract)
+      }
+      // Reset to midnight
+      monday.setHours(0, 0, 0, 0)
     } else {
       // Find the most recent Monday
-      const day = today.getDay()
-      const diff = today.getDate() - day + (day === 0 ? -6 : 1)
+      const day = today.getDay() // 0 is Sunday, 1 is Monday, etc.
+      const daysToSubtract = day === 0 ? 6 : day - 1
       monday = new Date(today)
-      monday.setDate(diff)
+      monday.setDate(today.getDate() - daysToSubtract)
+      monday.setHours(0, 0, 0, 0)
     }
 
+    // Rest of the function remains the same...
     // Check if a timesheet already exists for this week
     const existingTimesheet = timesheets.find(
       (ts) =>
@@ -235,11 +182,12 @@ export function SimpleTimesheet() {
       return
     }
 
+    // Create a temporary timesheet object without saving to API yet
     const newTimesheet: Timesheet = {
-      id: crypto.randomUUID(),
+      id: "temp-" + Date.now(), // Temporary ID that will be replaced when saved
       weekStarting: monday,
       client: "",
-      location: "", // Project name
+      location: "",
       status: "draft",
       hours: [0, 0, 0, 0, 0, 0, 0],
       timeDetails: Array(7).fill({ useDetailedTime: false }),
@@ -248,139 +196,234 @@ export function SimpleTimesheet() {
       submittedBy: currentUser.name,
     }
 
-    // Add the new timesheet to the beginning of the array
-    setTimesheets([newTimesheet, ...timesheets])
+    // Set the editing timesheet and switch to the add tab
     setEditingTimesheet(newTimesheet)
     setActiveTab("add")
   }
 
-  // Update the editTimesheet function to allow viewing any timesheet, but in read-only mode if needed
-  const editTimesheet = (timesheetId: string) => {
+  const editTimesheet = async (timesheetId: string) => {
     if (timesheetId === "new") {
       createNewTimesheet()
       return
     }
 
-    const timesheet = timesheets.find((ts) => ts.id === timesheetId)
-    if (timesheet) {
-      // Set the editing timesheet regardless of status
-      setEditingTimesheet(timesheet)
-      setActiveTab("add")
+    // Add check to prevent API call with undefined ID
+    if (!timesheetId) {
+      console.error("Attempted to edit timesheet with undefined ID")
+      toast({
+        title: "Error",
+        description: "Invalid timesheet ID. Cannot edit this timesheet.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      console.log(`Fetching timesheet with ID: ${timesheetId}`)
+      const timesheet = await timesheetService.getTimesheetById(timesheetId)
+
+      if (timesheet) {
+        console.log("Timesheet loaded successfully:", timesheet)
+        // Set the editing timesheet regardless of status
+        setEditingTimesheet(timesheet)
+        setActiveTab("add")
+      } else {
+        console.error("Timesheet not found")
+        toast({
+          title: "Error",
+          description: "Timesheet not found",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Failed to get timesheet:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load timesheet. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
-  const saveTimesheet = (updatedTimesheet: Timesheet) => {
-    setTimesheets(timesheets.map((ts) => (ts.id === updatedTimesheet.id ? updatedTimesheet : ts)))
-    setActiveTab("entries")
-    setEditingTimesheet(null)
-  }
+  const saveTimesheet = async (updatedTimesheet: Timesheet) => {
+    try {
+      let savedTimesheet: Timesheet
 
-  const submitTimesheet = (timesheetId: string | Timesheet) => {
-    // Handle both direct timesheet object (from entry form) and timesheet ID (from list)
-    if (typeof timesheetId === "string") {
-      setTimesheets(
-        timesheets.map((ts) =>
-          ts.id === timesheetId
-            ? {
-                ...ts,
-                status: "submitted" as TimesheetStatus,
-                submittedAt: new Date(),
-              }
-            : ts,
-        ),
-      )
-    } else {
-      // Handle direct timesheet object
-      setTimesheets(
-        timesheets.map((ts) =>
-          ts.id === timesheetId.id
-            ? {
-                ...timesheetId,
-                status: "submitted" as TimesheetStatus,
-                submittedAt: new Date(),
-              }
-            : ts,
-        ),
-      )
+      // Check if this is a new timesheet (with a temp ID) or an existing one
+      const isNewTimesheet = updatedTimesheet.id.startsWith("temp-")
+
+      if (isNewTimesheet) {
+        // For new timesheets, use createTimesheet instead of updateTimesheet
+        console.log("Creating new timesheet:", updatedTimesheet)
+        savedTimesheet = await timesheetService.createTimesheet(updatedTimesheet)
+      } else {
+        // For existing timesheets, use updateTimesheet as before
+        console.log("Updating existing timesheet:", updatedTimesheet)
+        savedTimesheet = await timesheetService.updateTimesheet(updatedTimesheet.id, updatedTimesheet)
+      }
+
+      // Update the timesheets list
+      if (isNewTimesheet) {
+        // Add the new timesheet to the list
+        setTimesheets([...timesheets, savedTimesheet])
+      } else {
+        // Update the existing timesheet in the list
+        setTimesheets(timesheets.map((ts) => (ts.id === savedTimesheet.id ? savedTimesheet : ts)))
+      }
+
       setActiveTab("entries")
       setEditingTimesheet(null)
+
+      toast({
+        title: "Success",
+        description: "Timesheet saved successfully",
+      })
+    } catch (error) {
+      console.error("Failed to save timesheet:", error)
+      toast({
+        title: "Error",
+        description: "Failed to save timesheet. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
-  const approveTimesheet = (timesheetId: string) => {
-    setTimesheets(
-      timesheets.map((ts) =>
-        ts.id === timesheetId
-          ? {
-              ...ts,
-              status: "approved" as TimesheetStatus,
-              approvedBy: currentUser.name,
-              approvedAt: new Date(),
-            }
-          : ts,
-      ),
-    )
+  const submitTimesheet = async (timesheetId: string | Timesheet) => {
+    try {
+      // Handle both direct timesheet object (from entry form) and timesheet ID (from list)
+      const id = typeof timesheetId === "string" ? timesheetId : timesheetId.id
+      let timesheetToSubmit = id
+
+      // If it's a new timesheet with a temp ID, create it first
+      if (typeof timesheetId !== "string" && id.startsWith("temp-")) {
+        console.log("Creating new timesheet before submitting:", timesheetId)
+        const createdTimesheet = await timesheetService.createTimesheet(timesheetId)
+        timesheetToSubmit = createdTimesheet.id
+
+        // Update the timesheets list with the newly created timesheet
+        setTimesheets([...timesheets, createdTimesheet])
+      } else if (typeof timesheetId !== "string") {
+        // For existing timesheets, save any changes first
+        await timesheetService.updateTimesheet(id, timesheetId)
+      }
+
+      // Then submit the timesheet
+      const submittedTimesheet = await timesheetService.submitTimesheet(timesheetToSubmit)
+
+      setTimesheets(timesheets.map((ts) => (ts.id === submittedTimesheet.id ? submittedTimesheet : ts)))
+
+      if (typeof timesheetId !== "string") {
+        setActiveTab("entries")
+        setEditingTimesheet(null)
+      }
+
+      toast({
+        title: "Success",
+        description: "Timesheet submitted successfully",
+      })
+    } catch (error) {
+      console.error("Failed to submit timesheet:", error)
+      toast({
+        title: "Error",
+        description: "Failed to submit timesheet. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
-  const rejectTimesheet = (timesheetId: string, reason: string) => {
-    setTimesheets(
-      timesheets.map((ts) =>
-        ts.id === timesheetId
-          ? {
-              ...ts,
-              status: "rejected" as TimesheetStatus,
-              approvedBy: currentUser.name,
-              approvedAt: new Date(),
-              rejectionReason: reason,
-            }
-          : ts,
-      ),
-    )
+  const approveTimesheet = async (timesheetId: string) => {
+    try {
+      const approvedTimesheet = await timesheetService.approveTimesheet(timesheetId)
+      setTimesheets(timesheets.map((ts) => (ts.id === approvedTimesheet.id ? approvedTimesheet : ts)))
+
+      toast({
+        title: "Success",
+        description: "Timesheet approved successfully",
+      })
+    } catch (error) {
+      console.error("Failed to approve timesheet:", error)
+      toast({
+        title: "Error",
+        description: "Failed to approve timesheet. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
-  const sendForPayment = (timesheetId: string) => {
-    setTimesheets(
-      timesheets.map((ts) =>
-        ts.id === timesheetId
-          ? {
-              ...ts,
-              status: "pending_payment" as TimesheetStatus,
-              sentForPaymentBy: currentUser.name,
-              sentForPaymentAt: new Date(),
-            }
-          : ts,
-      ),
-    )
+  const rejectTimesheet = async (timesheetId: string, reason: string) => {
+    try {
+      const rejectedTimesheet = await timesheetService.rejectTimesheet(timesheetId, reason)
+      setTimesheets(timesheets.map((ts) => (ts.id === rejectedTimesheet.id ? rejectedTimesheet : ts)))
+
+      toast({
+        title: "Success",
+        description: "Timesheet rejected successfully",
+      })
+    } catch (error) {
+      console.error("Failed to reject timesheet:", error)
+      toast({
+        title: "Error",
+        description: "Failed to reject timesheet. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
-  const markAsPaid = (timesheetId: string) => {
-    setTimesheets(
-      timesheets.map((ts) =>
-        ts.id === timesheetId
-          ? {
-              ...ts,
-              status: "paid" as TimesheetStatus,
-              paidBy: currentUser.name,
-              paidAt: new Date(),
-            }
-          : ts,
-      ),
-    )
+  const sendForPayment = async (timesheetId: string) => {
+    try {
+      const pendingPaymentTimesheet = await timesheetService.sendForPayment(timesheetId)
+      setTimesheets(timesheets.map((ts) => (ts.id === pendingPaymentTimesheet.id ? pendingPaymentTimesheet : ts)))
+
+      toast({
+        title: "Success",
+        description: "Timesheet sent for payment successfully",
+      })
+    } catch (error) {
+      console.error("Failed to send timesheet for payment:", error)
+      toast({
+        title: "Error",
+        description: "Failed to send timesheet for payment. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
-  const undoApproval = (timesheetId: string) => {
-    setTimesheets(
-      timesheets.map((ts) =>
-        ts.id === timesheetId
-          ? {
-              ...ts,
-              status: "submitted" as TimesheetStatus,
-              approvedBy: undefined,
-              approvedAt: undefined,
-            }
-          : ts,
-      ),
-    )
+  const markAsPaid = async (timesheetId: string) => {
+    try {
+      const paidTimesheet = await timesheetService.markAsPaid(timesheetId)
+      setTimesheets(timesheets.map((ts) => (ts.id === paidTimesheet.id ? paidTimesheet : ts)))
+
+      toast({
+        title: "Success",
+        description: "Timesheet marked as paid successfully",
+      })
+    } catch (error) {
+      console.error("Failed to mark timesheet as paid:", error)
+      toast({
+        title: "Error",
+        description: "Failed to mark timesheet as paid. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const undoApproval = async (timesheetId: string) => {
+    try {
+      const submittedTimesheet = await timesheetService.undoApproval(timesheetId)
+      setTimesheets(timesheets.map((ts) => (ts.id === submittedTimesheet.id ? submittedTimesheet : ts)))
+
+      toast({
+        title: "Success",
+        description: "Timesheet approval undone successfully",
+      })
+    } catch (error) {
+      console.error("Failed to undo timesheet approval:", error)
+      toast({
+        title: "Error",
+        description: "Failed to undo timesheet approval. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
   const cancelEditing = () => {
@@ -399,9 +442,7 @@ export function SimpleTimesheet() {
   }
 
   // Filter timesheets for the current user (or all for managers)
-  const userTimesheets = timesheets.filter(
-    (ts) => ts.submittedBy === currentUser.name || currentUser.role === "manager",
-  )
+  const userTimesheets = timesheets.filter((ts) => ts.submittedBy === currentUser.name || isManager)
 
   // Filter timesheets for a specific employee if selected
   const filteredTimesheets = selectedEmployee
@@ -421,6 +462,9 @@ export function SimpleTimesheet() {
     )
   }
 
+  // Calculate the number of tabs based on user role
+  const numTabs = isManager ? 7 : 3
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
@@ -428,15 +472,15 @@ export function SimpleTimesheet() {
           <div className="text-3xl font-bold">BH</div>
           <div className="text-sm text-gray-500">Timesheet System</div>
         </div>
-        <div className="text-sm">
-          <span className="font-medium">{currentUser.name}</span> ({currentUser.role}) |{" "}
-          <button onClick={toggleRole} className="text-blue-500 underline">
-            Switch to {currentUser.role === "employee" ? "Manager" : "Employee"}
-          </button>{" "}
-          |{" "}
-          <a href="#" className="text-blue-500">
+        <div className="text-sm flex items-center gap-2">
+          <span className="font-medium">{currentUser.name}</span>
+          <span className="px-2 py-1 bg-gray-100 rounded-full text-xs">
+            {currentUser.role === "manager" ? "Manager" : "Employee"}
+          </span>
+          <button onClick={handleLogout} className="text-blue-500 flex items-center gap-1">
+            <LogOut className="h-3 w-3" />
             Log Out
-          </a>
+          </button>
         </div>
       </div>
 
@@ -444,27 +488,27 @@ export function SimpleTimesheet() {
         <TabsList
           className="grid w-full"
           style={{
-            gridTemplateColumns:
-              currentUser.role === "manager" ? "repeat(7, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
+            gridTemplateColumns: `repeat(${numTabs}, minmax(0, 1fr))`,
           }}
         >
           <TabsTrigger value="entries">Time Entries</TabsTrigger>
           <TabsTrigger value="add">{editingTimesheet ? "Edit Entry" : "Add Entry"}</TabsTrigger>
           <TabsTrigger value="summary">Summary</TabsTrigger>
-          {currentUser.role === "manager" && <TabsTrigger value="approval">Approvals</TabsTrigger>}
-          {currentUser.role === "manager" && (
+
+          {isManager && <TabsTrigger value="approval">Approvals</TabsTrigger>}
+          {isManager && (
             <TabsTrigger value="users" className="flex items-center gap-1">
               <Users className="h-4 w-4" />
               Users
             </TabsTrigger>
           )}
-          {currentUser.role === "manager" && (
+          {isManager && (
             <TabsTrigger value="customers" className="flex items-center gap-1">
               <Building className="h-4 w-4" />
               Customers
             </TabsTrigger>
           )}
-          {currentUser.role === "manager" && (
+          {isManager && (
             <TabsTrigger value="projects" className="flex items-center gap-1">
               <Briefcase className="h-4 w-4" />
               Projects
@@ -474,7 +518,13 @@ export function SimpleTimesheet() {
 
         <TabsContent value="entries">
           <Card className="p-6">
-            <TimesheetList timesheets={userTimesheets} onEditTimesheet={editTimesheet} currentUser={currentUser} />
+            {isLoading ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">Loading timesheets...</p>
+              </div>
+            ) : (
+              <TimesheetList timesheets={userTimesheets} onEditTimesheet={editTimesheet} currentUser={currentUser} />
+            )}
           </Card>
         </TabsContent>
 
@@ -494,8 +544,16 @@ export function SimpleTimesheet() {
                 <button
                   onClick={() => createNewTimesheet()}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  disabled={isCreating}
                 >
-                  Create New Timesheet
+                  {isCreating ? (
+                    <>
+                      <span className="inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                      Creating...
+                    </>
+                  ) : (
+                    "Create New Timesheet"
+                  )}
                 </button>
               </div>
             )}
@@ -505,37 +563,46 @@ export function SimpleTimesheet() {
         <TabsContent value="summary">
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Summary</h2>
-            <TimesheetSummary
-              timesheets={currentUser.role === "manager" ? timesheets : userTimesheets}
-              isManager={currentUser.role === "manager"}
-            />
+            {isLoading ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">Loading summary data...</p>
+              </div>
+            ) : (
+              <TimesheetSummary timesheets={isManager ? timesheets : userTimesheets} isManager={isManager} />
+            )}
           </Card>
         </TabsContent>
 
-        {currentUser.role === "manager" && (
+        {isManager && (
           <TabsContent value="approval">
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Timesheet Approvals</h2>
-              <TimesheetApproval
-                timesheets={timesheets.filter(
-                  (ts) =>
-                    ts.status === "submitted" ||
-                    ts.status === "approved" ||
-                    ts.status === "pending_payment" ||
-                    ts.status === "paid",
-                )}
-                onApprove={approveTimesheet}
-                onReject={rejectTimesheet}
-                onMarkAsPaid={markAsPaid}
-                onSendForPayment={sendForPayment}
-                onViewInvoice={viewInvoice}
-                onUndoApproval={undoApproval}
-              />
+              {isLoading ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Loading approval data...</p>
+                </div>
+              ) : (
+                <TimesheetApproval
+                  timesheets={timesheets.filter(
+                    (ts) =>
+                      ts.status === "submitted" ||
+                      ts.status === "approved" ||
+                      ts.status === "pending_payment" ||
+                      ts.status === "paid",
+                  )}
+                  onApprove={approveTimesheet}
+                  onReject={rejectTimesheet}
+                  onMarkAsPaid={markAsPaid}
+                  onSendForPayment={sendForPayment}
+                  onViewInvoice={viewInvoice}
+                  onUndoApproval={undoApproval}
+                />
+              )}
             </Card>
           </TabsContent>
         )}
 
-        {currentUser.role === "manager" && (
+        {isManager && (
           <TabsContent value="users">
             <Card className="p-6">
               <UserManagement />
@@ -543,7 +610,7 @@ export function SimpleTimesheet() {
           </TabsContent>
         )}
 
-        {currentUser.role === "manager" && (
+        {isManager && (
           <TabsContent value="customers">
             <Card className="p-6">
               <CustomerManagement />
@@ -551,7 +618,7 @@ export function SimpleTimesheet() {
           </TabsContent>
         )}
 
-        {currentUser.role === "manager" && (
+        {isManager && (
           <TabsContent value="projects">
             <Card className="p-6">
               <ProjectManagement />

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth import authenticate
-from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory, Invoice
 
 User = get_user_model()
 
@@ -74,7 +74,7 @@ class ProjectSerializer(serializers.ModelSerializer):
 class TimesheetDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = TimesheetDetail
-        fields = ['uuid', 'day', 'hours', 'start_time', 'end_time', 'break_minutes', 
+        fields = ['uuid', 'day', 'date', 'hours', 'start_time', 'end_time', 'break_minutes', 
                  'use_detailed_time', 'note']
 
 class RateHistorySerializer(serializers.ModelSerializer):
@@ -229,3 +229,81 @@ class AuditLogSerializer(serializers.ModelSerializer):
         if obj.changed_by:
             return obj.changed_by.get_full_name() or obj.changed_by.email
         return None
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    customer = CustomerSerializer(read_only=True)
+    project = ProjectSerializer(read_only=True)
+    created_by = UserSerializer(read_only=True)
+    timesheets = TimesheetSerializer(many=True, read_only=True)
+    is_overdue = serializers.BooleanField(read_only=True)
+    
+    # Write-only fields for creation/update
+    customer_uuid = serializers.UUIDField(write_only=True)
+    project_uuid = serializers.UUIDField(write_only=True)
+    timesheet_uuids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = Invoice
+        fields = [
+            'uuid', 'invoice_number', 'customer', 'customer_uuid', 'project', 'project_uuid',
+            'start_date', 'end_date', 'total_hours', 'hourly_rate', 'daily_rate',
+            'fixed_price', 'retainer_amount', 'total_amount', 'status', 'due_date',
+            'sent_date', 'paid_date', 'timesheets', 'timesheet_uuids', 'notes',
+            'terms', 'created_by', 'created_at', 'updated_at', 'is_overdue'
+        ]
+        read_only_fields = [
+            'uuid', 'invoice_number', 'created_at', 'updated_at', 'sent_date',
+            'paid_date', 'created_by'
+        ]
+
+    def create(self, validated_data):
+        # Extract UUIDs for relationships
+        customer_uuid = validated_data.pop('customer_uuid')
+        project_uuid = validated_data.pop('project_uuid')
+        timesheet_uuids = validated_data.pop('timesheet_uuids', [])
+
+        # Get related objects
+        customer = Customer.objects.get(uuid=customer_uuid)
+        project = Project.objects.get(uuid=project_uuid)
+        timesheets = Timesheet.objects.filter(uuid__in=timesheet_uuids) if timesheet_uuids else []
+
+        # Create invoice
+        invoice = Invoice.objects.create(
+            customer=customer,
+            project=project,
+            created_by=self.context['request'].user,
+            **validated_data
+        )
+
+        # Add timesheets
+        if timesheets:
+            invoice.timesheets.set(timesheets)
+
+        return invoice
+
+    def update(self, instance, validated_data):
+        # Handle customer and project updates
+        if 'customer_uuid' in validated_data:
+            customer_uuid = validated_data.pop('customer_uuid')
+            instance.customer = Customer.objects.get(uuid=customer_uuid)
+        
+        if 'project_uuid' in validated_data:
+            project_uuid = validated_data.pop('project_uuid')
+            instance.project = Project.objects.get(uuid=project_uuid)
+
+        # Handle timesheet updates
+        if 'timesheet_uuids' in validated_data:
+            timesheet_uuids = validated_data.pop('timesheet_uuids')
+            timesheets = Timesheet.objects.filter(uuid__in=timesheet_uuids)
+            instance.timesheets.set(timesheets)
+
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance

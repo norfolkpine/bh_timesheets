@@ -1,7 +1,12 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { format, startOfMonth, endOfMonth, isWithinInterval, addMonths, subMonths } from "date-fns"
+import { format } from "date-fns/format"
+import { startOfMonth } from "date-fns/startOfMonth"
+import { endOfMonth } from "date-fns/endOfMonth"
+import { isWithinInterval } from "date-fns/isWithinInterval"
+import { addMonths } from "date-fns/addMonths"
+import { subMonths } from "date-fns/subMonths"
 import { Printer, ChevronLeft, ChevronRight, Download, ArrowLeft } from "lucide-react"
 import type { Timesheet, User } from "./simple-timesheet"
 import { Button } from "@/components/ui/button"

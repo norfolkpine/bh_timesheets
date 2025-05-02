@@ -10,24 +10,31 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import type { EmployeeProfile } from "@/services/employee-service"
 
 const userFormSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters"),
+  first_name: z.string().min(2, "First name must be at least 2 characters"),
+  last_name: z.string().min(2, "Last name must be at least 2 characters"),
   email: z.string().email("Please enter a valid email address"),
   role: z.enum(["employee", "manager"]),
-  employeeId: z.string().optional(),
   department: z.string().optional(),
   position: z.string().optional(),
-  hourlyRate: z.coerce.number().min(0, "Hourly rate must be a positive number").optional(),
-  bankName: z.string().optional(),
-  accountNumber: z.string().optional(),
-  sortCode: z.string().optional(),
-  taxId: z.string().optional(),
+  hourly_rate: z.coerce.number().min(0, "Hourly rate must be a positive number").optional(),
+  bank_name: z.string().optional(),
+  account_number: z.string().optional(),
+  sort_code: z.string().optional(),
+  tax_id: z.string().optional(),
   address: z.string().optional(),
   phone: z.string().optional(),
-  startDate: z.string().optional(),
-  isActive: z.boolean().default(true),
+  start_date: z
+    .string()
+    .optional()
+    .refine((val) => !val || /^\d{4}-\d{2}-\d{2}$/.test(val), {
+      message: "Date must be in format YYYY-MM-DD",
+    }),
+  is_active: z.boolean().default(true),
   notes: z.string().optional(),
+  employee_id: z.string().optional(),
 })
 
 type UserFormValues = z.infer<typeof userFormSchema>
@@ -35,34 +42,58 @@ type UserFormValues = z.infer<typeof userFormSchema>
 interface UserFormProps {
   onSave: (user: UserFormValues) => void
   onCancel: () => void
-  initialUser?: Partial<UserFormValues>
+  initialUser?: Partial<EmployeeProfile>
 }
 
 export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
     defaultValues: {
-      name: initialUser?.name || "",
+      first_name: initialUser?.first_name || "",
+      last_name: initialUser?.last_name || "",
       email: initialUser?.email || "",
       role: initialUser?.role || "employee",
-      employeeId: initialUser?.employeeId || "",
       department: initialUser?.department || "",
       position: initialUser?.position || "",
-      hourlyRate: initialUser?.hourlyRate || undefined,
-      bankName: initialUser?.bankName || "",
-      accountNumber: initialUser?.accountNumber || "",
-      sortCode: initialUser?.sortCode || "",
-      taxId: initialUser?.taxId || "",
+      hourly_rate: initialUser?.hourly_rate || undefined,
+      bank_name: initialUser?.bank_name || "",
+      account_number: initialUser?.account_number || "",
+      sort_code: initialUser?.sort_code || "",
+      tax_id: initialUser?.tax_id || "",
       address: initialUser?.address || "",
       phone: initialUser?.phone || "",
-      startDate: initialUser?.startDate || "",
-      isActive: initialUser?.isActive !== undefined ? initialUser.isActive : true,
+      start_date: initialUser?.start_date || "",
+      is_active: initialUser?.is_active !== undefined ? initialUser.is_active : true,
       notes: initialUser?.notes || "",
+      employee_id: initialUser?.employee_id || "",
     },
   })
 
   const handleSubmit = (values: UserFormValues) => {
-    onSave(values)
+    // Create a copy of the values to avoid mutating the original
+    const formattedValues = { ...values }
+
+    // Format the date to YYYY-MM-DD if it exists
+    if (formattedValues.start_date) {
+      // Ensure it's in the correct format
+      const dateValue = formattedValues.start_date
+      // Check if it's already in the correct format
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+        try {
+          // Parse the date and format it correctly
+          const date = new Date(dateValue)
+          if (!isNaN(date.getTime())) {
+            formattedValues.start_date = date.toISOString().split("T")[0]
+          }
+        } catch (error) {
+          console.error("Error formatting date:", error)
+          // If there's an error parsing, remove the date to avoid API errors
+          formattedValues.start_date = ""
+        }
+      }
+    }
+
+    onSave(formattedValues)
   }
 
   return (
@@ -74,19 +105,35 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
               <CardTitle>Basic Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Full Name*</FormLabel>
-                    <FormControl>
-                      <Input placeholder="John Smith" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="first_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>First Name*</FormLabel>
+                      <FormControl>
+                        <Input placeholder="John" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="last_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Last Name*</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Smith" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={form.control}
@@ -124,35 +171,35 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
                 )}
               />
 
-              <div className="grid grid-cols-2 gap-4">
+              {initialUser?.employee_id && (
                 <FormField
                   control={form.control}
-                  name="employeeId"
-                  render={({ field }) => (
+                  name="employee_id"
+                  render={() => (
                     <FormItem>
                       <FormLabel>Employee ID</FormLabel>
                       <FormControl>
-                        <Input placeholder="EMP-001" {...field} />
+                        <div className="p-2 border rounded-md bg-gray-50">{initialUser.employee_id}</div>
                       </FormControl>
-                      <FormMessage />
+                      <FormDescription>Employee ID is automatically generated</FormDescription>
                     </FormItem>
                   )}
                 />
+              )}
 
-                <FormField
-                  control={form.control}
-                  name="startDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Start Date</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+              <FormField
+                control={form.control}
+                name="start_date"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Start Date</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField
@@ -186,7 +233,7 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
 
               <FormField
                 control={form.control}
-                name="isActive"
+                name="is_active"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
                     <div className="space-y-0.5">
@@ -210,7 +257,7 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
               <CardContent className="space-y-4">
                 <FormField
                   control={form.control}
-                  name="hourlyRate"
+                  name="hourly_rate"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Hourly Rate ($)</FormLabel>
@@ -225,7 +272,7 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
 
                 <FormField
                   control={form.control}
-                  name="bankName"
+                  name="bank_name"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Bank Name</FormLabel>
@@ -240,7 +287,7 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
-                    name="accountNumber"
+                    name="account_number"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Account Number</FormLabel>
@@ -254,7 +301,7 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
 
                   <FormField
                     control={form.control}
-                    name="sortCode"
+                    name="sort_code"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Sort Code</FormLabel>
@@ -269,7 +316,7 @@ export function UserForm({ onSave, onCancel, initialUser }: UserFormProps) {
 
                 <FormField
                   control={form.control}
-                  name="taxId"
+                  name="tax_id"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Tax ID / National Insurance Number</FormLabel>
