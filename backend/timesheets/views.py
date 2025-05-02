@@ -4,13 +4,17 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
-from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
-from .serializers import CustomerSerializer, ProjectSerializer, TimesheetSerializer, TimesheetDetailSerializer, EmployeeProfileSerializer
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory
+from .serializers import (
+    CustomerSerializer, ProjectSerializer, TimesheetSerializer, 
+    TimesheetDetailSerializer, EmployeeProfileSerializer, AuditLogSerializer, RateHistorySerializer
+)
+from .mixins import AuditLogMixin, TimesheetSubmissionMixin
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, models
 
 User = get_user_model()
 
@@ -23,8 +27,6 @@ def create_employee_profile(sender, instance, created, **kwargs):
             role='employee',  # Default role
             employee_id=f"{settings.EMPLOYEE_ID_PREFIX}{instance.id:0{settings.EMPLOYEE_ID_PADDING}d}"  # Use settings for ID format
         )
-
-# Create your views here.
 
 class IsOwnerOrManager(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -59,7 +61,7 @@ class IsOwnerOrManager(permissions.BasePermission):
         return False
 
 @extend_schema(tags=['Customers'])
-class CustomerViewSet(viewsets.ModelViewSet):
+class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
     """
     API endpoint for managing customers.
     
@@ -70,8 +72,19 @@ class CustomerViewSet(viewsets.ModelViewSet):
     lookup_field = 'uuid'
     permission_classes = [permissions.IsAuthenticated]
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        
+        # Log changes before saving
+        self._log_changes(instance, serializer.validated_data, request.user)
+        
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
 @extend_schema(tags=['Projects'])
-class ProjectViewSet(viewsets.ModelViewSet):
+class ProjectViewSet(AuditLogMixin, viewsets.ModelViewSet):
     """
     API endpoint for managing projects.
     
@@ -82,8 +95,42 @@ class ProjectViewSet(viewsets.ModelViewSet):
     lookup_field = 'uuid'
     permission_classes = [permissions.IsAuthenticated]
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        
+        # Check for rate changes
+        rate_fields = {
+            'hourly_rate': 'project_hourly',
+            'daily_rate': 'project_daily',
+            'fixed_price': 'project_fixed',
+            'retainer_amount': 'project_retainer'
+        }
+        
+        for field, rate_type in rate_fields.items():
+            if field in serializer.validated_data:
+                new_rate = serializer.validated_data[field]
+                old_rate = getattr(instance, field)
+                if new_rate != old_rate:
+                    # Create rate history entry
+                    RateHistory.objects.create(
+                        rate_type=rate_type,
+                        project=instance,
+                        rate=new_rate,
+                        effective_from=timezone.now().date(),
+                        created_by=request.user,
+                        notes=f"{field.replace('_', ' ').title()} changed from {old_rate} to {new_rate}"
+                    )
+        
+        # Log changes before saving
+        self._log_changes(instance, serializer.validated_data, request.user)
+        
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
 @extend_schema(tags=['Timesheets'])
-class TimesheetViewSet(viewsets.ModelViewSet):
+class TimesheetViewSet(AuditLogMixin, TimesheetSubmissionMixin, viewsets.ModelViewSet):
     """
     API endpoint for managing timesheets.
     
@@ -106,23 +153,76 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
     @extend_schema(
+        description="Get summary statistics for timesheets",
+        responses={200: None}
+    )
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get summary statistics for timesheets"""
+        queryset = self.get_queryset()
+        
+        # Get date range from query params or default to current month
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        
+        if from_date:
+            queryset = queryset.filter(week_starting__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(week_starting__lte=to_date)
+            
+        # Calculate total hours
+        total_hours = queryset.aggregate(
+            total=models.Sum('total_hours')
+        )['total'] or 0
+        
+        # Calculate hours by status
+        hours_by_status = {}
+        for status, _ in Timesheet.STATUS_CHOICES:
+            hours = queryset.filter(status=status).aggregate(
+                total=models.Sum('total_hours')
+            )['total'] or 0
+            hours_by_status[status] = hours
+            
+        # Calculate count by status
+        count_by_status = {}
+        for status, _ in Timesheet.STATUS_CHOICES:
+            count = queryset.filter(status=status).count()
+            count_by_status[status] = count
+            
+        # Calculate hours by project
+        hours_by_project = {}
+        for timesheet in queryset:
+            project_name = timesheet.project.name
+            if project_name not in hours_by_project:
+                hours_by_project[project_name] = 0
+            hours_by_project[project_name] += timesheet.total_hours or 0
+            
+        # Calculate hours by user (for managers)
+        hours_by_user = {}
+        if request.user.is_staff or (hasattr(request.user, 'profile') and request.user.profile.role == 'manager'):
+            for timesheet in queryset:
+                user_name = f"{timesheet.user.first_name} {timesheet.user.last_name}".strip() or timesheet.user.email
+                if user_name not in hours_by_user:
+                    hours_by_user[user_name] = 0
+                hours_by_user[user_name] += timesheet.total_hours or 0
+        
+        return Response({
+            'total_hours': total_hours,
+            'hours_by_status': hours_by_status,
+            'count_by_status': count_by_status,
+            'hours_by_project': hours_by_project,
+            'hours_by_user': hours_by_user if request.user.is_staff or (hasattr(request.user, 'profile') and request.user.profile.role == 'manager') else None,
+            'total_timesheets': queryset.count(),
+        })
+
+    @extend_schema(
         description="Submit a timesheet for approval",
         responses={200: TimesheetSerializer}
     )
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def submit(self, request, uuid=None):
-        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
-        if timesheet.status != 'draft':
-            return Response(
-                {'error': 'Only draft timesheets can be submitted'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        timesheet.status = 'submitted'
-        timesheet.submitted_at = timezone.now()
-        timesheet.save()
-        serializer = self.get_serializer(timesheet)
-        return Response(serializer.data)
+        return self.submit_timesheet(request, uuid)
 
     @extend_schema(
         description="Approve a submitted timesheet",
@@ -131,23 +231,7 @@ class TimesheetViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def approve(self, request, uuid=None):
-        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
-        if timesheet.status != 'submitted':
-            return Response(
-                {'error': 'Only submitted timesheets can be approved'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if timesheet.approved_by:
-            return Response(
-                {'error': 'This timesheet has already been approved'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        timesheet.status = 'approved'
-        timesheet.approved_by = request.user
-        timesheet.approved_at = timezone.now()
-        timesheet.save()
-        serializer = self.get_serializer(timesheet)
-        return Response(serializer.data)
+        return self.approve_timesheet(request, uuid)
 
     @extend_schema(
         description="Reject a submitted timesheet",
@@ -156,30 +240,7 @@ class TimesheetViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def reject(self, request, uuid=None):
-        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
-        if timesheet.status != 'submitted':
-            return Response(
-                {'error': 'Only submitted timesheets can be rejected'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if timesheet.approved_by:
-            return Response(
-                {'error': 'This timesheet has already been approved'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        reason = request.data.get('reason', '')
-        if not reason:
-            return Response(
-                {'error': 'Rejection reason is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        timesheet.status = 'rejected'
-        timesheet.approved_by = request.user
-        timesheet.approved_at = timezone.now()
-        timesheet.rejection_reason = reason
-        timesheet.save()
-        serializer = self.get_serializer(timesheet)
-        return Response(serializer.data)
+        return self.reject_timesheet(request, uuid)
 
     @extend_schema(
         description="Mark an approved timesheet as pending payment",
@@ -188,23 +249,7 @@ class TimesheetViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def send_for_payment(self, request, uuid=None):
-        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
-        if timesheet.status != 'approved':
-            return Response(
-                {'error': 'Only approved timesheets can be sent for payment'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if timesheet.sent_for_payment_at:
-            return Response(
-                {'error': 'This timesheet has already been sent for payment'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        timesheet.status = 'pending_payment'
-        timesheet.sent_for_payment_by = request.user
-        timesheet.sent_for_payment_at = timezone.now()
-        timesheet.save()
-        serializer = self.get_serializer(timesheet)
-        return Response(serializer.data)
+        return self.send_for_payment(request, uuid)
 
     @extend_schema(
         description="Mark a pending payment timesheet as paid",
@@ -213,23 +258,7 @@ class TimesheetViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def mark_as_paid(self, request, uuid=None):
-        timesheet = Timesheet.objects.select_for_update().get(uuid=uuid)
-        if timesheet.status != 'pending_payment':
-            return Response(
-                {'error': 'Only pending payment timesheets can be marked as paid'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if timesheet.paid_at:
-            return Response(
-                {'error': 'This timesheet has already been marked as paid'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        timesheet.status = 'paid'
-        timesheet.paid_by = request.user
-        timesheet.paid_at = timezone.now()
-        timesheet.save()
-        serializer = self.get_serializer(timesheet)
-        return Response(serializer.data)
+        return self.mark_as_paid(request, uuid)
 
 @extend_schema(tags=['Timesheet Details'])
 class TimesheetDetailViewSet(viewsets.ModelViewSet):
@@ -251,9 +280,77 @@ class TimesheetDetailViewSet(viewsets.ModelViewSet):
             return TimesheetDetail.objects.all()  # Managers can see all timesheet details
         return TimesheetDetail.objects.filter(timesheet__user=user)
 
+@extend_schema(tags=['Audit Logs'])
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    API endpoint for viewing audit logs.
+    
+    Provides read-only access to audit log records.
+    """
+    serializer_class = AuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'uuid'
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = AuditLog.objects.all()
+        
+        # Filter by record type if provided
+        record_type = self.request.query_params.get('record_type')
+        if record_type:
+            queryset = queryset.filter(record_type=record_type)
+            
+        # Filter by record UUID if provided
+        record_uuid = self.request.query_params.get('record_uuid')
+        if record_uuid:
+            queryset = queryset.filter(record_uuid=record_uuid)
+            
+        # Filter by field type if provided
+        field_type = self.request.query_params.get('field_type')
+        if field_type:
+            queryset = queryset.filter(field_type=field_type)
+            
+        # Non-staff users can only see their own changes
+        if not user.is_staff:
+            queryset = queryset.filter(changed_by=user)
+            
+        return queryset
+
+@extend_schema(tags=['Rate History'])
+class RateHistoryViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing rate history.
+    
+    Provides CRUD operations for tracking rate changes over time.
+    """
+    serializer_class = RateHistorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'uuid'
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = RateHistory.objects.all()
+        
+        # Filter by employee or project if provided
+        employee_uuid = self.request.query_params.get('employee_uuid')
+        project_uuid = self.request.query_params.get('project_uuid')
+        
+        if employee_uuid:
+            queryset = queryset.filter(employee__uuid=employee_uuid)
+        if project_uuid:
+            queryset = queryset.filter(project__uuid=project_uuid)
+            
+        # Non-staff users can only see their own rate history
+        if not user.is_staff and not (hasattr(user, 'profile') and user.profile.role == 'manager'):
+            queryset = queryset.filter(employee__user=user)
+            
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 @extend_schema(tags=['Employees'])
-class EmployeeProfileViewSet(viewsets.ModelViewSet):
+class EmployeeProfileViewSet(AuditLogMixin, viewsets.ModelViewSet):
     """
     API endpoint for managing employee profiles.
     
@@ -304,6 +401,31 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        
+        # Check if hourly rate is being changed
+        if 'hourly_rate' in serializer.validated_data:
+            new_rate = serializer.validated_data['hourly_rate']
+            if new_rate != instance.hourly_rate:
+                # Create rate history entry
+                RateHistory.objects.create(
+                    rate_type='employee_hourly',
+                    employee=instance,
+                    rate=new_rate,
+                    effective_from=timezone.now().date(),
+                    created_by=request.user,
+                    notes=f"Rate changed from {instance.hourly_rate} to {new_rate}"
+                )
+        
+        # Log changes before saving
+        self._log_changes(instance, serializer.validated_data, request.user)
+        
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response

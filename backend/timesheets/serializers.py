@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth import authenticate
-from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile, AuditLog, RateHistory
 
 User = get_user_model()
 
@@ -77,6 +77,24 @@ class TimesheetDetailSerializer(serializers.ModelSerializer):
         fields = ['uuid', 'day', 'hours', 'start_time', 'end_time', 'break_minutes', 
                  'use_detailed_time', 'note']
 
+class RateHistorySerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+    rate_type_display = serializers.CharField(source='get_rate_type_display', read_only=True)
+
+    class Meta:
+        model = RateHistory
+        fields = [
+            'uuid', 'rate_type', 'rate_type_display', 'employee', 'project',
+            'rate', 'effective_from', 'effective_to', 'notes',
+            'created_by_name', 'created_at'
+        ]
+        read_only_fields = ['uuid', 'created_at']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.email
+        return None
+
 class TimesheetSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     project = ProjectSerializer(read_only=True)
@@ -86,13 +104,18 @@ class TimesheetSerializer(serializers.ModelSerializer):
     approved_by = UserSerializer(read_only=True)
     sent_for_payment_by = UserSerializer(read_only=True)
     paid_by = UserSerializer(read_only=True)
+    total_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = Timesheet
-        fields = ['uuid', 'user', 'project', 'project_uuid', 'week_starting', 'status',
-                 'total_hours', 'notes', 'submitted_at', 'approved_by', 'approved_at',
-                 'rejection_reason', 'sent_for_payment_at', 'sent_for_payment_by',
-                 'paid_at', 'paid_by', 'details', 'details_data']
+        fields = [
+            'uuid', 'user', 'project', 'project_uuid', 'week_starting', 'status',
+            'total_hours', 'total_amount', 'notes', 'submitted_at', 'approved_by', 'approved_at',
+            'rejection_reason', 'sent_for_payment_at', 'sent_for_payment_by',
+            'paid_at', 'paid_by', 'details', 'details_data',
+            'hourly_rate_at_submission', 'daily_rate_at_submission',
+            'fixed_price_at_submission', 'retainer_amount_at_submission'
+        ]
 
     def create(self, validated_data):
         details_data = validated_data.pop('details_data', [])
@@ -190,3 +213,19 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
         instance.save()
 
         return instance
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    changed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            'uuid', 'record_type', 'record_uuid', 'field_type', 'field_name',
+            'old_value', 'new_value', 'changed_by_name', 'changed_at', 'notes'
+        ]
+        read_only_fields = fields
+
+    def get_changed_by_name(self, obj):
+        if obj.changed_by:
+            return obj.changed_by.get_full_name() or obj.changed_by.email
+        return None

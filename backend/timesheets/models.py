@@ -71,10 +71,28 @@ class Timesheet(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Add fields to store the rate at the time of submission
+    hourly_rate_at_submission = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    daily_rate_at_submission = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    fixed_price_at_submission = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    retainer_amount_at_submission = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
     def __str__(self):
         return f"Timesheet {self.id} - {self.user} - {self.week_starting}"
 
     def save(self, *args, **kwargs):
+        # If this is a new timesheet or being submitted for the first time
+        if not self.pk or (self.status == 'submitted' and not self.hourly_rate_at_submission):
+            # Store the current rates
+            if self.project.billing_type == 'hourly':
+                self.hourly_rate_at_submission = self.project.hourly_rate
+            elif self.project.billing_type == 'daily':
+                self.daily_rate_at_submission = self.project.daily_rate
+            elif self.project.billing_type == 'fixed':
+                self.fixed_price_at_submission = self.project.fixed_price
+            elif self.project.billing_type == 'retainer':
+                self.retainer_amount_at_submission = self.project.retainer_amount
+        
         # Calculate total hours from details
         total = Decimal('0.00')
         for detail in self.details.all():
@@ -109,6 +127,19 @@ class Timesheet(models.Model):
             if 0 <= detail.day < 7:  # Ensure day is valid
                 notes[detail.day] = detail.note or ''
         return notes
+
+    @property
+    def total_amount(self):
+        """Calculate the total amount based on the rates at submission time"""
+        if self.project.billing_type == 'hourly':
+            return self.total_hours * (self.hourly_rate_at_submission or 0)
+        elif self.project.billing_type == 'daily':
+            return (self.total_hours / 8) * (self.daily_rate_at_submission or 0)
+        elif self.project.billing_type == 'fixed':
+            return self.fixed_price_at_submission or 0
+        elif self.project.billing_type == 'retainer':
+            return self.retainer_amount_at_submission or 0
+        return 0
 
 class TimesheetDetail(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
@@ -173,3 +204,92 @@ class EmployeeProfile(models.Model):
 
     class Meta:
         ordering = ['-created_at', 'employee_id']  # Order by newest first, then by employee_id
+
+class AuditLog(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
+    RECORD_TYPE_CHOICES = [
+        ('employee_profile', 'Employee Profile'),
+        ('customer', 'Customer'),
+        ('project', 'Project'),
+        ('timesheet', 'Timesheet'),
+    ]
+    
+    FIELD_TYPE_CHOICES = [
+        ('user_details', 'User Details'),
+        ('bank_details', 'Bank Details'),
+        ('rate', 'Rate'),
+        ('status', 'Status'),
+        ('other', 'Other'),
+    ]
+    
+    record_type = models.CharField(max_length=20, choices=RECORD_TYPE_CHOICES)
+    record_uuid = models.UUIDField(db_index=True)  # UUID of the changed record
+    field_type = models.CharField(max_length=20, choices=FIELD_TYPE_CHOICES)
+    field_name = models.CharField(max_length=100)  # Name of the changed field
+    old_value = models.TextField(blank=True, null=True)
+    new_value = models.TextField(blank=True, null=True)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
+    changed_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-changed_at']
+        indexes = [
+            models.Index(fields=['record_type', 'record_uuid']),
+            models.Index(fields=['field_type']),
+            models.Index(fields=['changed_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.record_type} - {self.field_name} changed at {self.changed_at}"
+
+class RateHistory(models.Model):
+    """Tracks historical rates for employees and projects"""
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
+    RATE_TYPE_CHOICES = [
+        ('employee_hourly', 'Employee Hourly Rate'),
+        ('project_hourly', 'Project Hourly Rate'),
+        ('project_daily', 'Project Daily Rate'),
+        ('project_fixed', 'Project Fixed Rate'),
+        ('project_retainer', 'Project Retainer Rate'),
+    ]
+    
+    rate_type = models.CharField(max_length=20, choices=RATE_TYPE_CHOICES)
+    employee = models.ForeignKey(EmployeeProfile, on_delete=models.CASCADE, null=True, blank=True, related_name='rate_history')
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, null=True, blank=True, related_name='rate_history')
+    rate = models.DecimalField(max_digits=10, decimal_places=2)
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)  # Null means currently active
+    notes = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='created_rate_changes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-effective_from']
+        indexes = [
+            models.Index(fields=['rate_type', 'effective_from']),
+            models.Index(fields=['employee', 'effective_from']),
+            models.Index(fields=['project', 'effective_from']),
+        ]
+
+    def __str__(self):
+        if self.employee:
+            return f"{self.employee} - {self.get_rate_type_display()} - {self.rate} ({self.effective_from})"
+        return f"{self.project} - {self.get_rate_type_display()} - {self.rate} ({self.effective_from})"
+
+    def save(self, *args, **kwargs):
+        # If this is a new rate, end the previous rate
+        if not self.pk:  # Only for new records
+            if self.employee:
+                RateHistory.objects.filter(
+                    employee=self.employee,
+                    rate_type=self.rate_type,
+                    effective_to__isnull=True
+                ).update(effective_to=self.effective_from)
+            elif self.project:
+                RateHistory.objects.filter(
+                    project=self.project,
+                    rate_type=self.rate_type,
+                    effective_to__isnull=True
+                ).update(effective_to=self.effective_from)
+        super().save(*args, **kwargs)
