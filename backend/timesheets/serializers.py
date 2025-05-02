@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth import authenticate
-from .models import Customer, Project, Timesheet, TimesheetDetail
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
 
 User = get_user_model()
 
@@ -130,3 +130,19 @@ class TimesheetSerializer(serializers.ModelSerializer):
                 TimesheetDetail.objects.create(timesheet=instance, **detail)
         
         return instance 
+    
+
+class EmployeeProfileSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    email = serializers.EmailField(source='user.email')
+
+    class Meta:
+        model = EmployeeProfile
+        fields = [
+            'id', 'name', 'email', 'role', 'employee_id', 'department', 'position',
+            'hourly_rate', 'bank_name', 'account_number', 'sort_code', 'tax_id',
+            'address', 'phone', 'start_date', 'is_active', 'notes', 'created_at'
+        ]
+
+    def get_name(self, obj):
+        return obj.user.get_full_name()

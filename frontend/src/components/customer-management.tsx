@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Plus, Edit, Trash2, Building } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,65 +16,52 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { customerService } from "@/services/customer"
+import type { Customer, CustomerCreate, CustomerUpdate } from "@/types/customer"
+import { toast } from "sonner"
 
-export type Customer = {
-  id: string
-  name: string
-  contactName?: string
-  email?: string
-  phone?: string
-  address?: string
-  notes?: string
-  isActive: boolean
-  createdAt: Date
-  updatedAt?: Date
+interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
 }
 
-// Sample customers for demonstration
-export const INITIAL_CUSTOMERS: Customer[] = [
-  {
-    id: "cust1",
-    name: "ABC Corporation",
-    contactName: "Jane Smith",
-    email: "jane.smith@abccorp.com",
-    phone: "+1 (555) 123-4567",
-    address: "123 Main St, San Francisco, CA 94105",
-    notes: "Key client for software development projects",
-    isActive: true,
-    createdAt: new Date(2023, 0, 15),
-  },
-  {
-    id: "cust2",
-    name: "XYZ Industries",
-    contactName: "John Johnson",
-    email: "john@xyzindustries.com",
-    phone: "+1 (555) 987-6543",
-    address: "456 Oak St, Chicago, IL 60601",
-    notes: "Manufacturing client",
-    isActive: true,
-    createdAt: new Date(2023, 1, 20),
-  },
-  {
-    id: "cust3",
-    name: "Global Healthcare",
-    contactName: "Sarah Williams",
-    email: "sarah@globalhealthcare.org",
-    phone: "+1 (555) 456-7890",
-    address: "789 Medical Dr, Boston, MA 02115",
-    notes: "Healthcare provider",
-    isActive: true,
-    createdAt: new Date(2023, 2, 10),
-  },
-]
-
 export function CustomerManagement() {
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS)
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [isAddingCustomer, setIsAddingCustomer] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState("all")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    loadCustomers()
+  }, [])
+
+  const loadCustomers = async () => {
+    try {
+      setLoading(true)
+      const response = await customerService.getCustomers()
+      // Handle both array and paginated responses
+      if (Array.isArray(response)) {
+        setCustomers(response)
+      } else {
+        const paginatedResponse = response as unknown as PaginatedResponse<Customer>
+        setCustomers(paginatedResponse.results || [])
+      }
+      setError(null)
+    } catch (err) {
+      console.error('Error loading customers:', err)
+      setError('Failed to load customers')
+      toast.error('Failed to load customers')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleAddCustomer = () => {
     setIsAddingCustomer(true)
@@ -91,39 +78,43 @@ export function CustomerManagement() {
     setDeleteDialogOpen(true)
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (customerToDelete) {
-      setCustomers(customers.filter((c) => c.id !== customerToDelete.id))
-      setDeleteDialogOpen(false)
-      setCustomerToDelete(null)
+      try {
+        await customerService.deleteCustomer(customerToDelete.id)
+        setCustomers(customers.filter((c) => c.id !== customerToDelete.id))
+        setDeleteDialogOpen(false)
+        setCustomerToDelete(null)
+        toast.success('Customer deleted successfully')
+      } catch (err) {
+        console.error('Error deleting customer:', err)
+        toast.error('Failed to delete customer')
+      }
     }
   }
 
-  const handleSaveCustomer = (customerData: any) => {
-    if (editingCustomer) {
-      // Update existing customer
-      setCustomers(
-        customers.map((customer) =>
-          customer.id === editingCustomer.id
-            ? {
-                ...customer,
-                ...customerData,
-                updatedAt: new Date(),
-              }
-            : customer,
-        ),
-      )
-      setEditingCustomer(null)
-    } else {
-      // Add new customer
-      const newCustomer: Customer = {
-        id: `cust${customers.length + 1}`,
-        ...customerData,
-        isActive: customerData.isActive !== undefined ? customerData.isActive : true,
-        createdAt: new Date(),
+  const handleSaveCustomer = async (customerData: CustomerCreate | CustomerUpdate) => {
+    try {
+      if (editingCustomer) {
+        // Update existing customer
+        const updatedCustomer = await customerService.updateCustomer(editingCustomer.id, customerData)
+        setCustomers(
+          customers.map((customer) =>
+            customer.id === editingCustomer.id ? updatedCustomer : customer
+          )
+        )
+        setEditingCustomer(null)
+        toast.success('Customer updated successfully')
+      } else {
+        // Add new customer
+        const newCustomer = await customerService.createCustomer(customerData as CustomerCreate)
+        setCustomers([...customers, newCustomer])
+        setIsAddingCustomer(false)
+        toast.success('Customer created successfully')
       }
-      setCustomers([...customers, newCustomer])
-      setIsAddingCustomer(false)
+    } catch (err) {
+      console.error('Error saving customer:', err)
+      toast.error('Failed to save customer')
     }
   }
 
@@ -133,18 +124,34 @@ export function CustomerManagement() {
   }
 
   // Filter customers based on search query and active tab
-  const filteredCustomers = customers.filter((customer) => {
+  const filteredCustomers = Array.isArray(customers) ? customers.filter((customer) => {
     const matchesSearch =
       customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      customer.contactName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      customer.email?.toLowerCase().includes(searchQuery.toLowerCase())
+      (customer.contactName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (customer.email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
 
     if (activeTab === "all") return matchesSearch
     if (activeTab === "active") return matchesSearch && customer.isActive
     if (activeTab === "inactive") return matchesSearch && !customer.isActive
 
     return matchesSearch
-  })
+  }) : []
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Loading customers...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-red-500">{error}</div>
+      </div>
+    )
+  }
 
   // If we're adding or editing a customer, show the form
   if (isAddingCustomer || editingCustomer) {

@@ -4,18 +4,42 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
-from .models import Customer, Project, Timesheet, TimesheetDetail
-from .serializers import CustomerSerializer, ProjectSerializer, TimesheetSerializer, TimesheetDetailSerializer
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
+from .serializers import CustomerSerializer, ProjectSerializer, TimesheetSerializer, TimesheetDetailSerializer, EmployeeProfileSerializer
 
 # Create your views here.
 
 class IsOwnerOrManager(permissions.BasePermission):
+    def has_permission(self, request, view):
+        # Allow authenticated users to access the view
+        return request.user and request.user.is_authenticated
+
     def has_object_permission(self, request, view, obj):
-        # Allow managers to do anything
+        # Allow staff users to do anything
         if request.user.is_staff:
             return True
-        # Allow users to access their own timesheets
-        return obj.user == request.user
+
+        # For timesheets
+        if isinstance(obj, Timesheet):
+            # Allow users to access their own timesheets
+            if obj.user == request.user:
+                return True
+            # Allow managers to access their team's timesheets
+            if hasattr(request.user, 'profile') and request.user.profile.role == 'manager':
+                return True
+            return False
+
+        # For timesheet details
+        if isinstance(obj, TimesheetDetail):
+            # Allow users to access their own timesheet details
+            if obj.timesheet.user == request.user:
+                return True
+            # Allow managers to access their team's timesheet details
+            if hasattr(request.user, 'profile') and request.user.profile.role == 'manager':
+                return True
+            return False
+
+        return False
 
 @extend_schema(tags=['Customers'])
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -57,6 +81,8 @@ class TimesheetViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_staff:
             return Timesheet.objects.all()
+        if hasattr(user, 'profile') and user.profile.role == 'manager':
+            return Timesheet.objects.all()  # Managers can see all timesheets
         return Timesheet.objects.filter(user=user)
 
     def perform_create(self, serializer):
@@ -179,4 +205,21 @@ class TimesheetDetailViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_staff:
             return TimesheetDetail.objects.all()
+        if hasattr(user, 'profile') and user.profile.role == 'manager':
+            return TimesheetDetail.objects.all()  # Managers can see all timesheet details
         return TimesheetDetail.objects.filter(timesheet__user=user)
+
+
+@extend_schema(tags=['Employees'])
+class EmployeeProfileViewSet(viewsets.ViewSet):
+    """
+    Retrieve the authenticated user's employee profile
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: EmployeeProfileSerializer})
+    @action(detail=False, methods=['get'], url_path='me')
+    def me(self, request):
+        profile = request.user.profile
+        serializer = EmployeeProfileSerializer(profile)
+        return Response(serializer.data)

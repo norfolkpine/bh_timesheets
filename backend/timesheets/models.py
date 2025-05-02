@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 import uuid
 from decimal import Decimal
+from django.contrib.auth.models import User
 
 # Create your models here.
 
@@ -129,3 +130,29 @@ class TimesheetDetail(models.Model):
 
     class Meta:
         unique_together = ('timesheet', 'day')  # Ensure only one detail per day per timesheet
+
+class EmployeeProfile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
+    
+    role = models.CharField(max_length=20, choices=[("employee", "Employee"), ("manager", "Manager")])
+    employee_id = models.CharField(max_length=50, unique=True)
+    department = models.CharField(max_length=100)
+    position = models.CharField(max_length=100)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    bank_name = models.CharField(max_length=100)
+    account_number = models.CharField(max_length=50)
+    sort_code = models.CharField(max_length=20)
+    tax_id = models.CharField(max_length=50)
+    
+    address = models.TextField()
+    phone = models.CharField(max_length=50)
+    start_date = models.DateField()
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.get_full_name()} ({self.employee_id})"

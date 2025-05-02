@@ -1,9 +1,12 @@
 from django.contrib import admin
 from django import forms
 from django.contrib.auth import get_user_model
-from .models import Customer, Project, Timesheet, TimesheetDetail
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from .models import Customer, Project, Timesheet, TimesheetDetail, EmployeeProfile
 
 User = get_user_model()
+
+# === Custom Forms ===
 
 class ProjectAdminForm(forms.ModelForm):
     class Meta:
@@ -30,6 +33,34 @@ class TimesheetDetailAdminForm(forms.ModelForm):
             'timesheet': forms.Select(attrs={'class': 'select2'}),
             'note': forms.Textarea(attrs={'rows': 3}),
         }
+
+# === Employee Profile Inline ===
+
+class EmployeeProfileInline(admin.StackedInline):
+    model = EmployeeProfile
+    can_delete = False
+    verbose_name_plural = "Employee Profile"
+    fk_name = 'user'
+
+class CustomUserAdmin(BaseUserAdmin):
+    inlines = (EmployeeProfileInline,)
+    list_display = ('username', 'email', 'first_name', 'last_name', 'is_staff')
+    list_select_related = ('profile',)
+
+# Unregister the original User and re-register with extended admin
+admin.site.unregister(User)
+admin.site.register(User, CustomUserAdmin)
+
+# === Model Admins ===
+
+@admin.register(EmployeeProfile)
+class EmployeeProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        'user', 'employee_id', 'role', 'department', 'position',
+        'hourly_rate', 'is_active', 'start_date'
+    )
+    search_fields = ('user__email', 'employee_id', 'department', 'position')
+    list_filter = ('role', 'department', 'is_active')
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
