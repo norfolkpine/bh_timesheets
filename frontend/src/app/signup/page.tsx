@@ -1,9 +1,13 @@
-import { SignupForm } from "@/components/signup-form"
+'use client';
 
-export default function SignupPage() {
+import { AuthForm } from '@/components/auth-form';
+
+export default function SignUpPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <SignupForm />
-    </div>
-  )
+    <AuthForm
+      type="signup"
+      title="Create an account"
+      description="Enter your email below to create your account"
+    />
+  );
 } 

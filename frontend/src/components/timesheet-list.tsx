@@ -1,40 +1,53 @@
 "use client"
+
+import { useEffect, useState } from "react"
 import { format } from "date-fns"
-import type { Timesheet, User } from "./simple-timesheet"
+import { timesheetService, TimesheetResponse } from "@/services/timesheet"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-
-// Add imports for the customer and project data
-import { INITIAL_CUSTOMERS } from "./customer-management"
-import { INITIAL_PROJECTS } from "./project-management"
-import { useState } from "react"
+import { useRouter } from "next/navigation"
 
 interface TimesheetListProps {
-  timesheets: Timesheet[]
   onEditTimesheet: (id: string) => void
-  currentUser: User
 }
 
-export function TimesheetList({ timesheets, onEditTimesheet, currentUser }: TimesheetListProps) {
-  // Sort timesheets by date in descending order (newest first)
-  const sortedTimesheets = [...timesheets].sort((a, b) => b.weekStarting.getTime() - a.weekStarting.getTime())
+export function TimesheetList({ onEditTimesheet }: TimesheetListProps) {
+  const [timesheets, setTimesheets] = useState<TimesheetResponse[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const router = useRouter()
 
-  // Add these inside the TimesheetList component, after the sortedTimesheets declaration:
-  const [customers] = useState(INITIAL_CUSTOMERS)
-  const [projects] = useState(INITIAL_PROJECTS)
+  useEffect(() => {
+    loadTimesheets()
+  }, [])
+
+  const loadTimesheets = async () => {
+    try {
+      setLoading(true)
+      const data = await timesheetService.getTimesheets()
+      setTimesheets(data)
+      setError(null)
+    } catch (err) {
+      setError('Failed to load timesheets')
+      console.error('Error loading timesheets:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Sort timesheets by date in descending order (newest first)
+  const sortedTimesheets = [...timesheets].sort(
+    (a, b) => new Date(b.week_starting).getTime() - new Date(a.week_starting).getTime()
+  )
 
   // Add helper functions to get names from IDs
-  const getClientName = (clientId: string) => {
-    const client = customers.find((c) => c.id === clientId)
-    return client ? client.name : clientId
+  const getClientName = (timesheet: TimesheetResponse) => {
+    return timesheet.project.customer.name
   }
 
-  const getProjectName = (projectId: string) => {
-    const project = projects.find((p) => p.id === projectId)
-    return project ? project.name : projectId
+  const getProjectName = (timesheet: TimesheetResponse) => {
+    return timesheet.project.name
   }
-
-  // Update the TimesheetList component to disable editing for non-editable timesheets
 
   // Add this function inside the TimesheetList component
   const canEditTimesheet = (status: string) => {
@@ -42,9 +55,9 @@ export function TimesheetList({ timesheets, onEditTimesheet, currentUser }: Time
   }
 
   // Update the getStatusBadge function to handle future timesheets
-  const getStatusBadge = (status: string, weekStarting: Date) => {
+  const getStatusBadge = (status: string, weekStarting: string) => {
     // Check if the timesheet is for a future week
-    const isFutureTimesheet = weekStarting > new Date()
+    const isFutureTimesheet = new Date(weekStarting) > new Date()
 
     // If it's a future timesheet, show a "Future" badge (priority over other statuses)
     if (isFutureTimesheet) {
@@ -102,15 +115,22 @@ export function TimesheetList({ timesheets, onEditTimesheet, currentUser }: Time
     }
   }
 
-  const getTotalHours = (hours: number[]) => {
-    return hours.reduce((sum, hour) => sum + hour, 0).toFixed(1)
+  if (loading) {
+    return <div>Loading timesheets...</div>
+  }
+
+  if (error) {
+    return <div className="text-red-500">{error}</div>
   }
 
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">My Timesheets</h2>
-        <Button onClick={() => onEditTimesheet("new")} className="bg-blue-600 hover:bg-blue-700 text-white">
+        <Button 
+          onClick={() => router.push('/timesheets/new')} 
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+        >
           New Timesheet
         </Button>
       </div>
@@ -133,23 +153,27 @@ export function TimesheetList({ timesheets, onEditTimesheet, currentUser }: Time
             <tbody>
               {sortedTimesheets.map((timesheet) => (
                 <tr
-                  key={timesheet.id}
+                  key={timesheet.uuid}
                   className="border-b last:border-b-0 hover:bg-gray-50 cursor-pointer"
-                  onClick={() => onEditTimesheet(timesheet.id)}
+                  onClick={() => router.push(`/timesheets/${timesheet.uuid}`)}
                 >
-                  <td className="px-4 py-3">{format(timesheet.weekStarting, "MMM d, yyyy")}</td>
+                  <td className="px-4 py-3">
+                    {format(new Date(timesheet.week_starting), "MMM d, yyyy")}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">
-                      {timesheet.client ? getClientName(timesheet.client) : "No client"}
+                      {getClientName(timesheet)}
                     </div>
                     <div className="text-sm text-gray-500">
-                      {timesheet.location ? getProjectName(timesheet.location) : "No project"}
+                      {getProjectName(timesheet)}
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-medium">{getTotalHours(timesheet.hours)}</td>
+                  <td className="px-4 py-3 font-medium">{timesheet.total_hours}</td>
                   <td className="px-4 py-3">
-                    {getStatusBadge(timesheet.status, timesheet.weekStarting)}
-                    {!canEditTimesheet(timesheet.status) && <div className="text-xs text-gray-500 mt-1">View only</div>}
+                    {getStatusBadge(timesheet.status, timesheet.week_starting)}
+                    {!canEditTimesheet(timesheet.status) && (
+                      <div className="text-xs text-gray-500 mt-1">View only</div>
+                    )}
                   </td>
                 </tr>
               ))}
