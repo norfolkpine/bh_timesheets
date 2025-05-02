@@ -145,6 +145,7 @@ class TimesheetDetail(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
     timesheet = models.ForeignKey(Timesheet, on_delete=models.CASCADE, related_name="details")
     day = models.PositiveSmallIntegerField()  # 0=Monday, 6=Sunday
+    date = models.DateField()  # The actual date for this entry
     hours = models.DecimalField(max_digits=4, decimal_places=2, blank=True, null=True)
     start_time = models.TimeField(blank=True, null=True)
     end_time = models.TimeField(blank=True, null=True)
@@ -158,6 +159,11 @@ class TimesheetDetail(models.Model):
         return f"Detail for {self.timesheet} day {self.day}"
 
     def save(self, *args, **kwargs):
+        # Calculate the actual date based on week_starting and day
+        if not self.date and self.timesheet:
+            from datetime import timedelta
+            self.date = self.timesheet.week_starting + timedelta(days=self.day)
+        
         # Calculate hours from start/end time if detailed time is used
         if self.use_detailed_time and self.start_time and self.end_time:
             start_minutes = self.start_time.hour * 60 + self.start_time.minute

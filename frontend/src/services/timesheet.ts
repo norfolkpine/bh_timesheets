@@ -1,5 +1,6 @@
 import { api } from './api';
 import type { Timesheet, TimesheetResponse, PaginatedResponse } from '@/types/timesheet';
+import type { TimeDetail } from '@/components/simple-timesheet';
 import { format } from 'date-fns';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
@@ -91,10 +92,13 @@ class TimesheetService {
       status: timesheet.status,
       hours: timesheet.details.map(d => d.hours || 0),
       timeDetails: timesheet.details.map(d => ({
+        day: d.day,
+        date: d.date,
         useDetailedTime: d.use_detailed_time,
         startTime: d.start_time,
         endTime: d.end_time,
         breakMinutes: d.break_minutes,
+        note: d.note
       })),
       dayNotes: timesheet.details.map(d => d.note || ''),
       notes: timesheet.notes,
@@ -111,15 +115,21 @@ class TimesheetService {
   }
 
   // Helper function to convert frontend format to backend format
-  convertToBackendFormat(timesheet: any): TimesheetCreate {
+  convertToBackendFormat(timesheet: any) {
     return {
-      week_starting: format(timesheet.weekStarting, 'yyyy-MM-dd'),
-      project_uuid: timesheet.project,
-      details_data: timesheet.hours.map((hours: number, index: number) => ({
+      week_starting: timesheet.weekStarting.toISOString().split('T')[0],
+      project_uuid: timesheet.project.uuid,
+      details_data: timesheet.timeDetails.map((detail: TimeDetail, index: number) => ({
         day: index,
-        hours: hours,
-        note: timesheet.dayNotes[index],
+        date: new Date(timesheet.weekStarting.getTime() + index * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        hours: timesheet.hours[index] || 0,
+        start_time: detail.startTime,
+        end_time: detail.endTime,
+        break_minutes: detail.breakMinutes,
+        use_detailed_time: detail.useDetailedTime,
+        note: detail.note || timesheet.dayNotes[index] || ''
       })),
+      notes: timesheet.notes
     };
   }
 }

@@ -26,6 +26,7 @@ export interface Project {
 export interface TimesheetDetail {
   uuid: string;
   day: number;
+  date: string;  // ISO date string
   hours: number;
   start_time?: string;
   end_time?: string;

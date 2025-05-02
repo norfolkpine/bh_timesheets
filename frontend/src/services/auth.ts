@@ -136,9 +136,12 @@ class AuthService {
         throw new Error(errorMessage);
       }
 
-      // Store the access token if it's in the response
+      // Store the tokens if they're in the response
       if (response.data.access) {
         localStorage.setItem('access_token', response.data.access);
+      }
+      if (response.data.refresh) {
+        localStorage.setItem('refresh_token', response.data.refresh);
       }
 
       return response.data;
@@ -197,8 +200,9 @@ class AuthService {
         {},
         this.getAuthHeaders()
       );
-      // Clear the access token
+      // Clear the tokens
       localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
     } catch (error) {
       console.error('Logout error:', error);
       throw error;

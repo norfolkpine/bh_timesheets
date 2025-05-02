@@ -8,15 +8,23 @@ User = get_user_model()
 
 # === Custom Forms ===
 
+class CustomerAdminForm(forms.ModelForm):
+    class Meta:
+        model = Customer
+        fields = '__all__'
+        read_only_fields = ['uuid']
+
 class ProjectAdminForm(forms.ModelForm):
     class Meta:
         model = Project
         fields = '__all__'
+        read_only_fields = ['uuid']
 
 class TimesheetAdminForm(forms.ModelForm):
     class Meta:
         model = Timesheet
         fields = '__all__'
+        read_only_fields = ['uuid']
         widgets = {
             'user': forms.Select(attrs={'class': 'select2'}),
             'project': forms.Select(attrs={'class': 'select2'}),
@@ -26,6 +34,7 @@ class TimesheetDetailAdminForm(forms.ModelForm):
     class Meta:
         model = TimesheetDetail
         fields = '__all__'
+        read_only_fields = ['uuid']
         widgets = {
             'timesheet': forms.Select(attrs={'class': 'select2'}),
             'note': forms.Textarea(attrs={'rows': 3}),
@@ -56,6 +65,7 @@ class EmployeeProfileAdmin(admin.ModelAdmin):
         'user', 'employee_id', 'role', 'department', 'position',
         'hourly_rate', 'is_active', 'start_date'
     )
+    readonly_fields = ['uuid']
     search_fields = ('user__email', 'employee_id', 'department', 'position')
     list_filter = ('role', 'department', 'is_active')
 
@@ -66,7 +76,9 @@ class ProjectInline(admin.StackedInline):
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
+    form = CustomerAdminForm
     list_display = ('name', 'email', 'phone', 'is_active', 'created_at', 'updated_at')
+    readonly_fields = ['uuid']
     search_fields = ('name', 'email', 'phone', 'contact_name')
     list_filter = ('is_active', 'created_at', 'updated_at')
     ordering = ('name',)
@@ -76,6 +88,7 @@ class CustomerAdmin(admin.ModelAdmin):
 class ProjectAdmin(admin.ModelAdmin):
     form = ProjectAdminForm
     list_display = ('name', 'customer', 'billing_type', 'is_active', 'created_at')
+    readonly_fields = ['uuid']
     list_filter = ('billing_type', 'is_active', 'customer', 'created_at')
     search_fields = ('name', 'customer__name', 'description')
     autocomplete_fields = ['customer']
@@ -90,6 +103,7 @@ class ProjectAdmin(admin.ModelAdmin):
 class TimesheetAdmin(admin.ModelAdmin):
     form = TimesheetAdminForm
     list_display = ('user', 'project', 'week_starting', 'total_hours', 'status', 'created_at')
+    readonly_fields = ['uuid']
     list_filter = ('status', 'week_starting', 'project', 'user')
     search_fields = ('user__email', 'project__name', 'notes')
     raw_id_fields = ('approved_by', 'sent_for_payment_by', 'paid_by')
@@ -106,6 +120,7 @@ class TimesheetAdmin(admin.ModelAdmin):
 class TimesheetDetailAdmin(admin.ModelAdmin):
     form = TimesheetDetailAdminForm
     list_display = ('timesheet', 'day', 'hours', 'start_time', 'end_time', 'break_minutes', 'use_detailed_time')
+    readonly_fields = ['uuid']
     list_filter = ('day', 'use_detailed_time', 'timesheet__week_starting')
     search_fields = ('note', 'timesheet__user__email', 'timesheet__project__name')
     raw_id_fields = ('timesheet',)

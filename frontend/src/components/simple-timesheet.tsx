@@ -25,10 +25,13 @@ export type User = {
 }
 
 export type TimeDetail = {
+  day: number
+  date: string
+  useDetailedTime: boolean
   startTime?: string
   endTime?: string
   breakMinutes?: number
-  useDetailedTime: boolean
+  note?: string
 }
 
 export type Timesheet = {
@@ -72,37 +75,45 @@ const INITIAL_TIMESHEETS: Timesheet[] = [
   // Current timesheet
   {
     id: "1",
-    weekStarting: baseDate, // April 7, 2025
-    client: "ABC Company",
+    weekStarting: new Date(2024, 2, 18), // March 18, 2024
+    client: "Acme Corp",
     location: "Website Redesign",
     status: "draft",
     hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
+    timeDetails: [
+      { day: 0, date: "2024-03-18", useDetailedTime: true, startTime: "09:00", endTime: "17:00", breakMinutes: 60 },
+      { day: 1, date: "2024-03-19", useDetailedTime: true, startTime: "09:00", endTime: "17:00", breakMinutes: 60 },
+      { day: 2, date: "2024-03-20", useDetailedTime: true, startTime: "09:00", endTime: "17:00", breakMinutes: 60 },
+      { day: 3, date: "2024-03-21", useDetailedTime: true, startTime: "09:00", endTime: "17:00", breakMinutes: 60 },
+      { day: 4, date: "2024-03-22", useDetailedTime: true, startTime: "09:00", endTime: "17:00", breakMinutes: 60 },
+      { day: 5, date: "2024-03-23", useDetailedTime: false },
+      { day: 6, date: "2024-03-24", useDetailedTime: false }
+    ],
     dayNotes: ["", "", "", "", "", "", ""],
     notes: "",
-    submittedBy: "John Smith",
+    submittedBy: "John Smith"
   },
   // Past timesheets
   {
     id: "2",
-    weekStarting: new Date(2025, 2, 31), // March 31, 2025
-    client: "XYZ Corporation",
-    location: "Mobile App Development",
+    weekStarting: new Date(2024, 2, 11), // March 11, 2024
+    client: "Tech Solutions",
+    location: "API Development",
     status: "submitted",
     hours: [8, 8, 8, 8, 8, 0, 0],
     timeDetails: [
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { startTime: "09:00", endTime: "17:30", breakMinutes: 30, useDetailedTime: true },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
+      { day: 0, date: "2024-03-11", useDetailedTime: false },
+      { day: 1, date: "2024-03-12", useDetailedTime: false },
+      { day: 2, date: "2024-03-13", useDetailedTime: false },
+      { day: 3, date: "2024-03-14", useDetailedTime: false },
+      { day: 4, date: "2024-03-15", useDetailedTime: false },
+      { day: 5, date: "2024-03-16", useDetailedTime: false },
+      { day: 6, date: "2024-03-17", useDetailedTime: false }
     ],
-    dayNotes: ["Client meeting", "Development", "Development", "Testing", "Documentation", "", ""],
+    dayNotes: ["", "", "", "", "", "", ""],
     notes: "",
     submittedBy: "John Smith",
-    submittedAt: new Date(2025, 3, 5),
+    submittedAt: new Date(2024, 2, 15)
   },
   {
     id: "3",
@@ -112,13 +123,13 @@ const INITIAL_TIMESHEETS: Timesheet[] = [
     status: "approved",
     hours: [8, 8, 8, 8, 4, 0, 0],
     timeDetails: [
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
-      { startTime: "09:00", endTime: "13:00", breakMinutes: 0, useDetailedTime: true },
-      { useDetailedTime: false },
-      { useDetailedTime: false },
+      { day: 0, date: "2025-03-24", useDetailedTime: false },
+      { day: 1, date: "2025-03-25", useDetailedTime: false },
+      { day: 2, date: "2025-03-26", useDetailedTime: false },
+      { day: 3, date: "2025-03-27", useDetailedTime: false },
+      { day: 4, date: "2025-03-28", startTime: "09:00", endTime: "13:00", breakMinutes: 0, useDetailedTime: true },
+      { day: 5, date: "2025-03-29", useDetailedTime: false },
+      { day: 6, date: "2025-03-30", useDetailedTime: false }
     ],
     dayNotes: ["", "", "", "", "Half day - doctor appointment", "", ""],
     notes: "",
@@ -134,7 +145,15 @@ const INITIAL_TIMESHEETS: Timesheet[] = [
     location: "Cloud Migration",
     status: "pending_payment",
     hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
+    timeDetails: [
+      { day: 0, date: "2025-03-17", useDetailedTime: false },
+      { day: 1, date: "2025-03-18", useDetailedTime: false },
+      { day: 2, date: "2025-03-19", useDetailedTime: false },
+      { day: 3, date: "2025-03-20", useDetailedTime: false },
+      { day: 4, date: "2025-03-21", useDetailedTime: false },
+      { day: 5, date: "2025-03-22", useDetailedTime: false },
+      { day: 6, date: "2025-03-23", useDetailedTime: false }
+    ],
     dayNotes: ["", "", "", "", "", "", ""],
     notes: "",
     submittedBy: "Sarah Johnson",
@@ -151,7 +170,15 @@ const INITIAL_TIMESHEETS: Timesheet[] = [
     location: "Support & Maintenance",
     status: "rejected",
     hours: [8, 8, 4, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
+    timeDetails: [
+      { day: 0, date: "2025-03-10", useDetailedTime: false },
+      { day: 1, date: "2025-03-11", useDetailedTime: false },
+      { day: 2, date: "2025-03-12", useDetailedTime: false },
+      { day: 3, date: "2025-03-13", useDetailedTime: false },
+      { day: 4, date: "2025-03-14", useDetailedTime: false },
+      { day: 5, date: "2025-03-15", useDetailedTime: false },
+      { day: 6, date: "2025-03-16", useDetailedTime: false }
+    ],
     dayNotes: ["", "", "Half day - doctor appointment", "", "", "", ""],
     notes: "Worked half day on Wednesday due to doctor appointment",
     submittedBy: "John Smith",
@@ -167,7 +194,15 @@ const INITIAL_TIMESHEETS: Timesheet[] = [
     location: "API Integration",
     status: "paid",
     hours: [8, 8, 8, 8, 8, 0, 0],
-    timeDetails: Array(7).fill({ useDetailedTime: false }),
+    timeDetails: [
+      { day: 0, date: "2025-03-03", useDetailedTime: false },
+      { day: 1, date: "2025-03-04", useDetailedTime: false },
+      { day: 2, date: "2025-03-05", useDetailedTime: false },
+      { day: 3, date: "2025-03-06", useDetailedTime: false },
+      { day: 4, date: "2025-03-07", useDetailedTime: false },
+      { day: 5, date: "2025-03-08", useDetailedTime: false },
+      { day: 6, date: "2025-03-09", useDetailedTime: false }
+    ],
     dayNotes: ["", "", "", "", "", "", ""],
     notes: "Completed all tasks ahead of schedule",
     submittedBy: "John Smith",
@@ -222,6 +257,14 @@ export function SimpleTimesheet() {
       monday.setDate(diff)
     }
 
+    // Allow creating timesheets up to 3 days before the week starts
+    const threeDaysFromNow = new Date(today)
+    threeDaysFromNow.setDate(today.getDate() + 3)
+    if (monday > threeDaysFromNow) {
+      alert("Cannot create timesheets more than 3 days in advance.")
+      return
+    }
+
     // Check if a timesheet already exists for this week
     const existingTimesheet = timesheets.find(
       (ts) =>
@@ -235,6 +278,17 @@ export function SimpleTimesheet() {
       return
     }
 
+    // Create time details for each day of the week
+    const timeDetails: TimeDetail[] = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(monday)
+      date.setDate(monday.getDate() + index)
+      return {
+        day: index,
+        date: date.toISOString().split('T')[0],
+        useDetailedTime: false
+      }
+    })
+
     const newTimesheet: Timesheet = {
       id: crypto.randomUUID(),
       weekStarting: monday,
@@ -242,7 +296,7 @@ export function SimpleTimesheet() {
       location: "", // Project name
       status: "draft",
       hours: [0, 0, 0, 0, 0, 0, 0],
-      timeDetails: Array(7).fill({ useDetailedTime: false }),
+      timeDetails,
       dayNotes: ["", "", "", "", "", "", ""],
       notes: "",
       submittedBy: currentUser.name,

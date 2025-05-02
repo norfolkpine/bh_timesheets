@@ -74,7 +74,7 @@ class ProjectSerializer(serializers.ModelSerializer):
 class TimesheetDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = TimesheetDetail
-        fields = ['uuid', 'day', 'hours', 'start_time', 'end_time', 'break_minutes', 
+        fields = ['uuid', 'day', 'date', 'hours', 'start_time', 'end_time', 'break_minutes', 
                  'use_detailed_time', 'note']
 
 class RateHistorySerializer(serializers.ModelSerializer):
@@ -116,6 +116,15 @@ class TimesheetSerializer(serializers.ModelSerializer):
             'hourly_rate_at_submission', 'daily_rate_at_submission',
             'fixed_price_at_submission', 'retainer_amount_at_submission'
         ]
+
+    def validate_week_starting(self, value):
+        from datetime import date, timedelta
+        today = date.today()
+        # Allow creating timesheets up to 3 days before the week starts
+        three_days_before = today + timedelta(days=3)
+        if value > three_days_before:
+            raise serializers.ValidationError("Cannot create timesheets more than 3 days in advance.")
+        return value
 
     def create(self, validated_data):
         details_data = validated_data.pop('details_data', [])

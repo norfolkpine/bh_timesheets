@@ -12,6 +12,7 @@ export const api = axios.create({
 api.interceptors.request.use(async (config) => {
   // Get the access token from localStorage
   const accessToken = localStorage.getItem('access_token');
+  const refreshToken = localStorage.getItem('refresh_token');
   
   // Add the access token to the Authorization header if it exists
   if (accessToken) {
@@ -52,22 +53,33 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
+        // Get refresh token from localStorage
+        const refreshToken = localStorage.getItem('refresh_token');
+        
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
+
         // Try to refresh the token
         const response = await axios.post(
           `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth/token/refresh/`,
-          {},
+          { refresh: refreshToken },
           { withCredentials: true }
         );
 
-        // If successful, update the token and retry the original request
+        // If successful, update the tokens and retry the original request
         if (response.data.access) {
           localStorage.setItem('access_token', response.data.access);
+          if (response.data.refresh) {
+            localStorage.setItem('refresh_token', response.data.refresh);
+          }
           originalRequest.headers['Authorization'] = `Bearer ${response.data.access}`;
           return api(originalRequest);
         }
       } catch (refreshError) {
-        // If refresh fails, redirect to login
+        // If refresh fails, clear tokens and redirect to login
         localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }
