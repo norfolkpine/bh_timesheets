@@ -95,6 +95,19 @@ class ProjectViewSet(AuditLogMixin, viewsets.ModelViewSet):
     lookup_field = 'uuid'
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        queryset = Project.objects.all()
+        
+        # Filter by customer if provided
+        customer_uuid = self.request.query_params.get('customer')
+        if customer_uuid:
+            queryset = queryset.filter(customer__uuid=customer_uuid)
+            
+        # Only show active projects by default
+        queryset = queryset.filter(is_active=True)
+        
+        return queryset.order_by('name')
+
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
