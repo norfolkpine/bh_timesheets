@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide covers the deployment process for the Ben Heath Pty Ltd Timesheets application. The application can be deployed to various environments using different deployment strategies.
+This guide covers the deployment process for the Timesheets application. The application can be deployed to various environments using different deployment strategies.
 
 ## Prerequisites
 
@@ -168,113 +168,4 @@ docker-compose -f docker-compose.prod.yml up -d
    ```
 
 2. Apply migrations:
-   ```bash
-   python manage.py migrate
    ```
-
-## Monitoring
-
-### Logs
-
-1. View application logs:
-   ```bash
-   docker-compose logs -f
-   ```
-
-2. View Nginx logs:
-   ```bash
-   sudo tail -f /var/log/nginx/access.log
-   sudo tail -f /var/log/nginx/error.log
-   ```
-
-### Health Checks
-
-1. Backend health check:
-   ```bash
-   curl https://api.bh-timesheets.com/health/
-   ```
-
-2. Frontend health check:
-   ```bash
-   curl https://bh-timesheets.com/health
-   ```
-
-## Security
-
-### SSL/TLS
-
-- Use Let's Encrypt for SSL certificates
-- Configure HSTS
-- Enable HTTP/2
-
-### Firewall
-
-```bash
-# Allow HTTP/HTTPS
-sudo ufw allow 80
-sudo ufw allow 443
-
-# Allow SSH
-sudo ufw allow 22
-
-# Enable firewall
-sudo ufw enable
-```
-
-### Database Security
-
-1. Use strong passwords
-2. Limit database access
-3. Regular security updates
-4. Enable SSL for database connections
-
-## Backup Strategy
-
-1. Daily database backups
-2. Weekly full system backups
-3. Monthly archive backups
-4. Off-site backup storage
-
-## Rollback Procedure
-
-1. Stop the current deployment:
-   ```bash
-   docker-compose down
-   ```
-
-2. Restore from backup:
-   ```bash
-   # Restore database
-   psql bh_timesheets < backup.sql
-   
-   # Restore application
-   git checkout <previous-version>
-   docker-compose up -d
-   ```
-
-## Maintenance
-
-### Regular Tasks
-
-1. Update dependencies:
-   ```bash
-   # Backend
-   pip install --upgrade -r requirements.txt
-   
-   # Frontend
-   npm update
-   ```
-
-2. Check logs for errors
-3. Monitor system resources
-4. Review security updates
-5. Test backup restoration
-
-### Emergency Procedures
-
-1. Identify the issue
-2. Stop affected services
-3. Restore from backup if necessary
-4. Deploy fix
-5. Monitor for stability
-6. Document the incident 

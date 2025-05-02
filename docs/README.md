@@ -1,4 +1,4 @@
-# Ben Heath Pty Ltd Timesheets Documentation
+# Timesheets Documentation
 
 ## Project Overview
 This is a full-stack timesheet management application built with Django (backend) and Next.js (frontend).

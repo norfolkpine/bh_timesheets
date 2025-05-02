@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide outlines the development workflow, coding standards, and best practices for the Ben Heath Pty Ltd Timesheets project.
+This guide outlines the development workflow, coding standards, and best practices for the Timesheets project.
 
 ## Development Environment
 

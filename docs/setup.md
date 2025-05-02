@@ -1,6 +1,6 @@
 # Setup Guide
 
-This guide will help you set up the development environment for the Ben Heath Pty Ltd Timesheets project.
+This guide will help you set up the development environment for the Timesheets project.
 
 ## Prerequisites
 

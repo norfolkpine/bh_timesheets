@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Ben Heath Pty Ltd Timesheets application follows a modern web application architecture with separate frontend and backend services.
+The Timesheets application follows a modern web application architecture with separate frontend and backend services.
 
 ## System Components
 
