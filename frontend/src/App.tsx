@@ -11,7 +11,7 @@ function App() {
         
         {/* Protected routes */}
         <Route
-          path="/dashboard"
+          path="/"
           element={
             <ProtectedRoute>
               <div>Dashboard (Protected)</div>
@@ -20,7 +20,7 @@ function App() {
         />
         
         {/* Redirect root to dashboard */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );

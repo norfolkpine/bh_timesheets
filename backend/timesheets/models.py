@@ -137,18 +137,18 @@ class EmployeeProfile(models.Model):
     
     role = models.CharField(max_length=20, choices=[("employee", "Employee"), ("manager", "Manager")])
     employee_id = models.CharField(max_length=50, unique=True)
-    department = models.CharField(max_length=100)
-    position = models.CharField(max_length=100)
-    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2)
+    department = models.CharField(max_length=100, blank=True, null=True)
+    position = models.CharField(max_length=100, blank=True, null=True)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     
-    bank_name = models.CharField(max_length=100)
-    account_number = models.CharField(max_length=50)
-    sort_code = models.CharField(max_length=20)
-    tax_id = models.CharField(max_length=50)
+    bank_name = models.CharField(max_length=100, blank=True, null=True)
+    account_number = models.CharField(max_length=50, blank=True, null=True)
+    sort_code = models.CharField(max_length=20, blank=True, null=True)
+    tax_id = models.CharField(max_length=50, blank=True, null=True)
     
-    address = models.TextField()
-    phone = models.CharField(max_length=50)
-    start_date = models.DateField()
+    address = models.TextField(blank=True, null=True)
+    phone = models.CharField(max_length=50, blank=True, null=True)
+    start_date = models.DateField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, null=True)
 

@@ -223,3 +223,29 @@ class EmployeeProfileViewSet(viewsets.ViewSet):
         profile = request.user.profile
         serializer = EmployeeProfileSerializer(profile)
         return Response(serializer.data)
+    
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework import permissions
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def current_user_info(request):
+    """
+    Return information about the current user including role
+    """
+    user = request.user
+    is_manager = False
+    
+    # Check if user has a profile and is a manager
+    if hasattr(user, 'profile') and user.profile.role == 'manager':
+        is_manager = True
+    
+    return Response({
+        'id': user.id,
+        'email': user.email,
+        'name': f"{user.first_name} {user.last_name}".strip() or user.username,
+        'role': 'manager' if is_manager else 'employee',
+        'is_staff': user.is_staff
+    })
